@@ -1,0 +1,152 @@
+# SHA-256 of every upstream source file and every preserved donor fixture
+# byte that fast_float 8.3.0's Zig package compiles, translates, or reads at
+# test time (tag v8.3.0, commit b0ab987b3dfdde13fa1915f65ef2a5c068d9208c,
+# https://github.com/fastfloat/fast_float), plus the Apache-2.0 known-answer
+# corpus vendored from https://github.com/fastfloat/supplemental_test_files at
+# commit 088643e8d5010bd3d1540fe48685601b43b9a3e5.
+#
+# 73 records, in three groups, all of them immutable bytes this package does not
+# author:
+#
+#   9   include/fast_float/*.h          the whole of upstream's library. These
+#                                       are compiled by zig/bridge.cpp into
+#                                       libfast_float.a; nothing else in this
+#                                       package contains parsing or rounding
+#                                       code. 177,467 bytes.
+#   48  tests/**                        upstream's own C++ test suite, carried
+#                                       whole. Nothing in it is built here --
+#                                       it needs a C++11 test framework this
+#                                       package does not vendor -- and none of
+#                                       it is deleted, edited or reformatted.
+#                                       299,185 bytes.
+#   16  testdata/supplemental/**        the independent known-answer corpus
+#                                       tests.zig reads from disk: 13 data
+#                                       files (274,299,340 bytes, 5,268,191
+#                                       lines) plus the donor repository's own
+#                                       LICENSE, README.md and CMakeLists.txt.
+#                                       All sixteen are hashed, including the
+#                                       four remyoudompheng-fptest-*.txt files
+#                                       that tests.zig deliberately does not
+#                                       read, because a preserved donor byte is
+#                                       preserved whatever this fork does with
+#                                       it.
+#
+# The set is exactly the upstream-owned and donor-owned bytes that
+# build.zig.zon `.paths` ships AND that a build compiles or a test reads. The
+# record is deliberately not a copy of .paths: build.zig, build.zig.zon,
+# build_support/, zig/, tests.zig, smoke.zig, consumer/, the five fork records
+# and this file are all fork-authored, and the remaining carried upstream trees
+# (benchmarks/, cmake/, ci/, docs/, script/, fuzz/, CMakeLists.txt,
+# BUILD.bazel, MODULE.bazel, .bazelrc, .clang-format,
+# clang-format-ignore.txt, AUTHORS, CONTRIBUTORS, README.md, SECURITY.md and
+# the three licence texts) are in .paths for provenance and are compiled or
+# read by nothing. Hashing files no build touches would make this a record of
+# the repository rather than of the library. The three upstream licence texts
+# are not byte-hashed here on purpose: .github/workflows/verify.yml's
+# provenance job already diffs LICENSE-APACHE, LICENSE-BOOST, LICENSE-MIT
+# against the pinned commit by name, so a change to any of them fails a gate
+# that this record cannot. The donor corpus licence,
+# testdata/supplemental/LICENSE, IS hashed, because no gate compares it.
+#
+# Deliberately absent, each for a stated reason:
+#   .gitignore -- this fork appends its own Zig ignore entries to upstream's
+#                list (see NOTICE.md), so the file is not byte-identical to
+#                upstream and a digest would bless the fork's own text as if
+#                it were upstream's.
+#   UPSTREAM.sha256 itself -- a record cannot contain its own digest.
+#   .zig-cache/, zig-cache/, zig-out/, consumer/.zig-cache/, consumer/zig-out/,
+#   consumer/zig-cache/ -- build products. They are absent from .paths, ignored
+#   by .gitignore, and excluded from every group above by construction: this
+#   record enumerates the three source subtrees explicitly rather than walking
+#   the repository root.
+#
+# How the digests were produced: each file was read as raw bytes with
+# Bun's Bun.file(path).arrayBuffer() and hashed with
+# createHash("sha256") from node:crypto on 2026-10-01. No shell hashing
+# command and no git command was used, so the digests are a property of the
+# bytes on disk, not of anything a version-control system says about them.
+#
+# What this establishes: the bytes a build compiles and the fixture its tests
+# read are the bytes this record pins, and any later edit to one of these 73
+# files fails the check loudly.
+#
+# What this does not establish: that they equal commit
+# b0ab987b3dfdde13fa1915f65ef2a5c068d9208c. It is not a signature and not a Git
+# object id. That the tree equals that commit rests on the import and on the
+# deterministic `git archive` stream digest recorded in UPSTREAM.md, both
+# produced by the driver, not by anything computed while writing this file.
+#
+# Verify with:  sha256sum -c UPSTREAM.sha256
+8e10d7c7f112319c9052f9295a67f6e0ceec219e0bd8ab3b980ecc13f724e489  include/fast_float/ascii_number.h
+ba39c5d8d8c8fe9ca8d7300aea8392a4367fd60689a9b8e3268aadceca729e53  include/fast_float/bigint.h
+2dd2dc5f98a8f1a78813e62d47e82a19ebe42af726356723d60f6eb387c6dd38  include/fast_float/constexpr_feature_detect.h
+82fad8134c272a3f1bc545b3ef367a2e9e3c7464b9dcef75640c37e325dfb973  include/fast_float/decimal_to_binary.h
+4dd408feceaa4dadafd2450a1e8f6c1b6c566ebec32474868811564d2f648fb4  include/fast_float/digit_comparison.h
+fec4c0dc177fb3986a9007824c81fb93338ef83a6dba23325d430174a8686ce1  include/fast_float/fast_float.h
+c18e0a0a2513215730557cc1dd53541cacd72855ddc0287934e78b364f989edb  include/fast_float/fast_table.h
+b798ecd1bee76dedf452c5669a24cb7184b9e4b3256ceef2fc5469b475c3009d  include/fast_float/float_common.h
+7831be00ec49c242656febb8feb89018c5d4ab3f7d390be8a317b06c37ed6a9b  include/fast_float/parse_number.h
+67b8e4b7048fe98dc8150cdb7f1b1b237717e681df186335342e97dde685cdfa  testdata/supplemental/CMakeLists.txt
+283ea6cc2997a1a70da0049e09adf9317bb60ca1b51279b65196b83a69e1996b  testdata/supplemental/LICENSE
+c00126a5ec5f99e56f2f240982b5f00406acd809acea0a335a9d7afdff8d3820  testdata/supplemental/README.md
+107ac506a0fb6af384b731019f83e184c27bd384364528ff18cd3720681eee66  testdata/supplemental/data/freetype-2-7.txt
+734ac4ea2034818681b76e50623da8fd6a5d66799378cf696b5f110cade5d087  testdata/supplemental/data/google-double-conversion.txt
+7d648e3fadd7d75707743c1f091f5e005596aaae44d79b3fd9a960fa79d64605  testdata/supplemental/data/google-wuffs.txt
+a2bb29cfb648f9ebfe153fe03e3113ed682f7efed5950c56e167fc90fed1e835  testdata/supplemental/data/ibm-fpgen.txt
+2f3c6e0afa2bb6d641595dcbb095cfb10466ab871cca261f495524ac90f095a6  testdata/supplemental/data/lemire-fast-double-parser.txt
+f68aab81b870cffa4606d481f7b841e5dce567a44297fe55d9c79ea77e0fbe4b  testdata/supplemental/data/lemire-fast-float.txt
+ac6b6dc7174e5a2aba750e9c0b3a177cd4b2fef9e3f06d70964d71d6c1931bff  testdata/supplemental/data/more-test-cases.txt
+9eb7c06fd33084c8edee4c22b191752ecf9b51f3dcfe0bffa16a244aca9f2533  testdata/supplemental/data/remyoudompheng-fptest-0.txt
+cd4e15a09424575287a5f6cd5479ec098109ace7402611c126b0cb9addcdae36  testdata/supplemental/data/remyoudompheng-fptest-1.txt
+01cdab4298e0441de4ee6e52fa24dac765eaebaf74d8bb1ae4b8615f0c223a44  testdata/supplemental/data/remyoudompheng-fptest-2.txt
+a1c3bd437ad173b426c725f6bd982b07f722cb2f7a525685c3b8a2fed439614c  testdata/supplemental/data/remyoudompheng-fptest-3.txt
+227476db6faf338c0e62efbed51f79c1ddacc63e297fef1b284ea0e9648d3b7b  testdata/supplemental/data/tencent-rapidjson.txt
+5c54633e8301c6ba3e9b9b5c5f6f7e0884cd2311418f2da6f2f9864d274be86c  testdata/supplemental/data/ulfjack-ryu.txt
+e357856713c05eaaa49a2675d259473d3c747e9e7657e62a111f16108accb74c  tests/BUILD.bazel
+f2e2740bc460124dc4bf8d5ff877a8799d005ab78894cee71f963ed20a603faa  tests/CMakeLists.txt
+77e83285adce30d31af4900e0c2e32c2c52be0aff0d7ee746524c1f4574ef2a6  tests/basictest.cpp
+fab0c0c00aa6eaa2eb0fbaf343a15986f3d565254751d23d1f574ef863007924  tests/bloat_analysis/CMakeLists.txt
+07ddcc7eda89c63d321c8d94d0ae1e345a6bf826b77a2d4c0f82a3d7a3738ffb  tests/bloat_analysis/a1.cpp
+f4757eb96e47cc29d22d1e2d60b33ef010a53582646964cda7d3565dbeb86a87  tests/bloat_analysis/a10.cpp
+a05fec15c489a8fee61e07f033231aac4633f587562bd2ac46b236330cad36ca  tests/bloat_analysis/a2.cpp
+75cf39d8afbec79815b6b597469181c3b7e55d0f720852f8c18cd4f937bc9652  tests/bloat_analysis/a3.cpp
+2fc2776aad67456e93fbabd4680ca6b33fd07a476e02b604bbbaad7c68f6de51  tests/bloat_analysis/a4.cpp
+7caf6ae067ecc3c951cdf6539ca0e092261b37c81d9e066e8ac6af1ef8ab1c7d  tests/bloat_analysis/a5.cpp
+c22ea6a82c1581ca10f0ea01fdb8cf3eb2163ebcc9bc131d3bcebf767b436dd3  tests/bloat_analysis/a6.cpp
+702b7e71fc60cc37ff01ec9daf7e95116f8a5498826880624e11ae03b6d45c32  tests/bloat_analysis/a7.cpp
+3aa56cf85925924477b32fe4ed008c44ff398b0f48e9b005493c7a1496195d75  tests/bloat_analysis/a8.cpp
+1356f4598c07a0a7a811bbeea45a665b051641251bbb2a9bcf7bada0f4381dfb  tests/bloat_analysis/a9.cpp
+d262cc634095cfe10ff5c9b3fe0755e96c4c4b0bcec50e3a91792af87e1934b6  tests/bloat_analysis/main.cpp
+475c30402aa5947b0ce5bf7455ec4825b1d35418a653698664643e412f7eda74  tests/bloat_analysis/main_ref.cpp
+3a0a0d3a124a91eaebf57d38d977e6171f4218784b3328156813618dfaee3f9c  tests/build_tests/CMakeLists.txt
+be6305d5fb05233e467a740efb6ec2b05d8d6248f1914aba1f40c64742d1241c  tests/build_tests/issue72/CMakeLists.txt
+8156324bf351da0f59878dc786b7269e682c9dcc6e725d697fbd28bef222c89f  tests/build_tests/issue72/foo.cpp
+1ddc672a73d2ff61c684313eb8f529804878d1dbfdd16de63f52e80ff43f2ae0  tests/build_tests/issue72/main.cpp
+e525776a325d75a85bade9fa413b06746ebc273998a307545ec9a042f64c7690  tests/build_tests/issue72/test.h
+db389edf2df1173efde3134ce979264b816cde615cd0435a26d9e65b8cce7c1c  tests/example_comma_test.cpp
+794add6a1dababb0ee5dc6a18fe9be96a390e5e127754d2bb0ec52d7fd96f694  tests/example_integer_times_pow10.cpp
+a8289393f05fb25214433d3d3fc5c1be6cd87421dc862ac86a5ac5f2bc465f6c  tests/example_test.cpp
+e57daed65cc702120db07b8d62770f3f1b001c080681a85606faf5eea2fa8cfa  tests/exhaustive32.cpp
+e091d5217e3212ae697c9a77f3ff44eac81ce9ebf8aa0825dbc7b6a9a968dd58  tests/exhaustive32_64.cpp
+377b5acdacc416e20d32f8933f639230aa10afa93ea0f199912b5674db4066f5  tests/exhaustive32_midpoint.cpp
+31338b529ad8621a5fa1f3a1486fe7ea205a97627bcb02d8124e4276c5efd301  tests/fast_int.cpp
+90e3e76d711dfc0dabdf86487adea4c1a47ef7bdd4a765266b2be4f6260e7691  tests/fixedwidthtest.cpp
+0690aca2d169fdcdb347b4c44422cfef4ca07aaac7bd4a3f3294ef97d780cd56  tests/fortran.cpp
+0ec8bd29133eeef97f0dd99706efa27e354520c9954e17c9917b6316be1cd3c8  tests/installation_tests/find/CMakeLists.txt
+5ac477559e7febd35d08e99dd9628b2bf836e600cf77163c40ca055b14d89963  tests/installation_tests/issue72_installation/CMakeLists.txt
+2dedf4fc52eda7c6f43eec7bdd82374ab8801f5df22f22e693414e62b22efeee  tests/ipv4_test.cpp
+911ac9c021f002e11036387542b3e193677ce32fc33cb3d81f0c1a3cca5d64b4  tests/javascript_fmt.cpp
+3245055a4f9a60df47297d565e8adf717e11930e1039c32598391bc56dcf8727  tests/json_fmt.cpp
+714bfab13ca0d6af39726565b26258f481430d1e29a640bbfddc80ea027ab834  tests/long_exhaustive32.cpp
+0f0f830f47753df62a0bc2d719eb91183c5fe1d4003687c7d0429e0715cb083e  tests/long_exhaustive32_64.cpp
+5cdfb7a83fde0aa659a99bc9cf38abc8bd94fe16ef45e8f5a953f1eb3c4b1c71  tests/long_random64.cpp
+a55a21b5413461f0f82ebd1b45bdd95f4000e384d921834e619a8a55b35512a4  tests/long_test.cpp
+540be038976b3c274d67e9a27cf5d44ce90e48822f41f73f6b093d2ac21e019d  tests/p2497.cpp
+bf9eee8e1bb440207f41de5d0cbd74c83d34026552e5f5cef3acc95f3a0748b8  tests/powersoffive_hardround.cpp
+cef7131457fc2374b396e808f7615164f343982be8c2518e24930311bd4134ce  tests/random64.cpp
+0437a6af9770ea2b1a0b55339543c594f4aebc70a41942351ea5de4fd4e0921f  tests/random_string.cpp
+688af37134b401e3081f0f7923673b21fd496bdb9a8cf1229d462f82070a4503  tests/rcppfastfloat_test.cpp
+956676c79ee3cdd412b30fbe07f71d329492b2295269959b681855c1c4d07ba8  tests/short_random_string.cpp
+80716cf9131342699c0453edcaec25b5fdb13fac312d27cc1be85631255c1f69  tests/string_test.cpp
+71114dc9ea7787a5547c87490ee4355d564ac1ab16aea6c39bdda9f0067fe536  tests/supported_chars_test.cpp
+008d86eea8801a2442719197f8a6c6373ae7b98c77b444d4029124c42e5c40a8  tests/wide_char_test.cpp

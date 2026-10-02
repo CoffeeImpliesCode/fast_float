@@ -1,0 +1,22 @@
+.{
+    .name = .fast_float_consumer,
+    .version = "0.1.0",
+    // Separate from the library's own fingerprint because this is a different
+    // package with a different name. It exists to prove that the library's
+    // published module can be consumed by a package that did not write it.
+    .fingerprint = 0xae533587b6809f99, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // A relative path, not a registry or archive URL. The consumer is the
+        // proof that `dep.module("fast_float")` works from outside the package
+        // that defines it; resolving that through the network would make the
+        // proof depend on a published state of the world instead of on this
+        // tree.
+        .fast_float = .{ .path = ".." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

@@ -22,3 +22,24 @@ Release/
 # VS CMake
 /out/
 /CMakeSettings.json
+
+# Fork additions. Everything above is upstream's own ignore list, kept intact
+# and unedited. No pattern above it swallows a Zig path: `build/*` names a
+# directory that does not exist here and does not match `build.zig`, and
+# upstream lists neither dot-directories nor subdirectories wholesale.
+#
+# `zig build` creates these directories at the repository root. They are build
+# products, so they stay out of commits, and neither appears in the `.paths`
+# allowlist in build.zig.zon, so an ordinary user build cannot change the
+# package hash.
+.zig-cache/
+zig-cache/
+zig-out/
+
+# `consumer/` is a package in its own right: `zig build run` inside it creates
+# its own output tree. It is listed here as well as in consumer/.gitignore so
+# that a run from the repository root cannot be committed by accident. An
+# operator who redirects the cache with --cache-dir owns that path instead.
+consumer/.zig-cache/
+consumer/zig-cache/
+consumer/zig-out/

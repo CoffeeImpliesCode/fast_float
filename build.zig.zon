@@ -1,0 +1,87 @@
+.{
+    // The package name a dependent writes as `fast_float` in `b.dependency`.
+    .name = .fast_float,
+    // Upstream's own version: CMakeLists.txt declares
+    // `project(fast_float VERSION 8.3.0)` and include/fast_float/float_common.h
+    // defines FASTFLOAT_VERSION_MAJOR 8, FASTFLOAT_VERSION_MINOR 3,
+    // FASTFLOAT_VERSION_PATCH 0.
+    .version = "8.3.0",
+    // Upstream ships no Zig package, so there is no upstream id to inherit and
+    // none to be hostile about. This value is the one the pinned Zig 0.16.0
+    // compiler reported for `.name = .fast_float`.
+    .fingerprint = 0xbcccf847f76fd221,
+    .minimum_zig_version = "0.16.0",
+    // The native core is compiled from this repository: upstream's headers are
+    // carried in `include`, the only C++ translation unit is `zig/bridge.cpp`,
+    // and nothing is fetched at build time. There is no dependency to declare.
+    .dependencies = .{},
+
+    .paths = .{
+        // The build graph, this manifest, and the matrix driver's settings
+        // profile. The profile is configuration, not prose: it is a Bash file
+        // `cross-test` sources when it is run from this package root, so it
+        // travels with the package for anyone reproducing the run and has to
+        // be inside `.paths` or a fetched copy of the package would silently
+        // fall back to the harness defaults.
+        "build.zig",
+        "build.zig.zon",
+        "cross-test.profile.sh",
+        // Where a target's graph is assembled. Imported by build.zig, so it is
+        // part of the package, not an editor-side convenience.
+        "build_support",
+        // The fork's own Zig-facing source: the facade root and the C ABI
+        // bridge header and translation unit.
+        "zig",
+        // The root test and smoke roots.
+        "tests.zig",
+        "smoke.zig",
+        // Upstream's public C++ header tree: the whole of the library.
+        "include",
+        // Upstream's own C++ test suite, carried unchanged. Nothing in it is
+        // built here -- it needs a C++11 test framework that is not vendored --
+        // and none of it is deleted.
+        "tests",
+        // Upstream's remaining build, benchmark, fuzz, tooling and
+        // documentation trees, carried unchanged so the package is upstream's
+        // tree plus this fork's Zig graph rather than a subset of it.
+        "benchmarks",
+        "cmake",
+        "ci",
+        "docs",
+        "script",
+        "fuzz",
+        "CMakeLists.txt",
+        "BUILD.bazel",
+        "MODULE.bazel",
+        ".bazelrc",
+        ".clang-format",
+        "clang-format-ignore.txt",
+        "AUTHORS",
+        "CONTRIBUTORS",
+        "README.md",
+        "SECURITY.md",
+        // The independent known-answer corpus the behavioural tests read
+        // through the resolved `fast_float_paths` option module. Apache-2.0,
+        // credited to Nigel Tao; provenance and selection are recorded in
+        // testdata/README.md. It is carried because `zig build test` needs the
+        // fixture bytes to be there.
+        "testdata",
+        // Upstream's three licences are kept verbatim and distinct. fast_float
+        // is triple licensed; a private downstream removes no upstream
+        // obligation.
+        "LICENSE-APACHE",
+        "LICENSE-BOOST",
+        "LICENSE-MIT",
+        // This fork's records.
+        "UPSTREAM.md",
+        "UPSTREAM.sha256",
+        "NOTICE.md",
+        "CHANGELOG.md",
+        "FORK-NOTES.md",
+        "README.zig.md",
+        // The separate consumer package. It lives inside this repository so
+        // its dependency on this package resolves as a relative path, with no
+        // registry entry and no network fetch.
+        "consumer",
+    },
+}

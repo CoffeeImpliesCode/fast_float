@@ -1,0 +1,389 @@
+# Verification for this fork.
+#
+# Upstream ships twenty-one workflows that drive GitHub Actions, Cirrus, Travis
+# and AppVeyor on the upstream maintainers' own infrastructure. None of them
+# are retargeted here: this file is the fork's gates and names only this
+# repository.
+#
+# Five jobs, five different questions:
+#   provenance  are upstream's three licence texts intact and recorded, is the
+#               pinned upstream commit still in this history, and is every
+#               upstream source, test, tool, documentation and licence file
+#               byte-identical to that commit
+#   native      does it build, do the behavioural tests pass in Debug and in
+#               ReleaseSafe, and does the smoke example execute and check its
+#               own answers on this host
+#   c-surface   does the *installed* C ABI artifact and the *installed* headers
+#               compile, link and run from outside the build graph -- once from
+#               C, once from C++
+#   cross       does the C++ bridge, the translated header, the facade, the
+#               tests and the example compile for each of the six required
+#               targets, with no target skipped and none pre-judged
+#   consumer    does the published module resolve from a package that did not
+#               write it
+#
+# Every job installs Zig 0.16.0 through setup-zig. The bare `zig` on a runner's
+# PATH is not used as a version-bearing shim.
+#
+# There is no source-text comparison of declaration names between the bridge
+# header and the C++ library: a name-set comparison fails when a line is
+# reindented and passes when a declaration is retyped, and it never proves a
+# consumer can call the header. The header's coverage is the c-surface job,
+# which compiles and links against the installed files.
+
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: "0.16.0"
+  # Annotated upstream tag v8.3.0, recorded in UPSTREAM.md. Named here too so
+  # that the provenance job and a reader of this file cannot disagree.
+  UPSTREAM_COMMIT: "b0ab987b3dfdde13fa1915f65ef2a5c068d9208c"
+
+jobs:
+  provenance:
+    name: licence and provenance
+    runs-on: ubuntu-latest
+    steps:
+      # This is the only job that reads git history: the commit gate and the
+      # pristine diff below both need the full clone, so it is asked for here
+      # and nowhere else.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fork records are present and non-empty
+        run: |
+          set -eu
+          for f in NOTICE.md UPSTREAM.md CHANGELOG.md FORK-NOTES.md README.zig.md; do
+            test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }
+          done
+
+      - name: The pinned upstream commit is in this history
+        run: |
+          set -eu
+          if ! git cat-file -e "$UPSTREAM_COMMIT^{commit}"; then
+            echo "pinned upstream commit $UPSTREAM_COMMIT is missing from this clone" >&2
+            echo "see UPSTREAM.md, 'Upstream'; re-fetch before changing the pin" >&2
+            exit 1
+          fi
+          echo "$UPSTREAM_COMMIT is present"
+
+      # fast_float is triple licensed and a private downstream removes no
+      # upstream obligation: all three texts ship verbatim, and the record has
+      # to name all three rather than the one the fork happens to prefer.
+      - name: All three upstream licences are shipped and recorded
+        run: |
+          set -eu
+          for f in LICENSE-APACHE LICENSE-BOOST LICENSE-MIT; do
+            test -s "$f" || { echo "missing upstream licence text: $f" >&2; exit 1; }
+            grep -q "$f" NOTICE.md || {
+              echo "NOTICE.md does not name $f" >&2
+              echo "a triple-licensed fork must record every grant it ships" >&2
+              exit 1
+            }
+          done
+          # The grant itself lives in upstream's README, because upstream puts
+          # no per-file notice in its headers. It has to survive there too.
+          grep -q 'LICENSE-APACHE' README.md
+          grep -q 'LICENSE-BOOST' README.md
+          grep -q 'LICENSE-MIT' README.md
+
+      - name: Independent fixture integrity
+        run: sha256sum -c UPSTREAM.sha256
+
+      # No upstream file may be edited. .gitignore is the one upstream path this
+      # fork appends to, and .github/ is where this workflow lives; both are
+      # excluded on purpose and the append is recorded in UPSTREAM.md instead
+      # of being diffed, because comparing this fork's own bookkeeping with
+      # itself would catch a reworded comment rather than a lost upstream file.
+      - name: Upstream sources are unmodified
+        run: |
+          set -eu
+          changed=$(git diff --name-only "$UPSTREAM_COMMIT" -- \
+            include tests benchmarks cmake ci docs script fuzz \
+            CMakeLists.txt BUILD.bazel MODULE.bazel .bazelrc \
+            .clang-format clang-format-ignore.txt \
+            AUTHORS CONTRIBUTORS README.md SECURITY.md \
+            LICENSE-APACHE LICENSE-BOOST LICENSE-MIT)
+          if [ -n "$changed" ]; then
+            echo "upstream files were modified:" >&2
+            echo "$changed" >&2
+            exit 1
+          fi
+          echo "every carried upstream file is byte-identical to $UPSTREAM_COMMIT"
+
+  native:
+    name: native build, tests, smoke and check
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow on purpose: nothing in this job reads git history.
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build
+        run: zig build --summary all
+
+      # Debug and ReleaseSafe are the two modes this fork gates: Debug is where
+      # an uninitialised read or a slice-out-of-bounds is loud, ReleaseSafe is
+      # where the same code has to survive the optimizer without the safety
+      # checks it would otherwise have had.
+      - name: Test (Debug)
+        run: zig build test --summary all
+
+      - name: Test (ReleaseSafe)
+        run: zig build test -Doptimize=ReleaseSafe --summary all
+
+      # The example parses real inputs, compares against values fixed by hand
+      # here rather than taken from the implementation, and exits non-zero on
+      # any disagreement, so its exit code is the semantic check.
+      - name: Smoke
+        run: zig build smoke --summary all
+
+      # With no -Dtarget this compiles all six required targets in one graph.
+      # The cross job below then repeats the same compiles one target per
+      # matrix entry; between them they cover both paths through build.zig --
+      # the full matrix loop and the explicit -Dtarget narrowing -- which is
+      # why this is here and not only there.
+      - name: Check (whole matrix in one graph)
+        run: zig build check --summary all
+
+  c-surface:
+    name: installed C ABI artifact and headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # The Zig facade reads the translated header from inside the build graph,
+      # not the installed copy, so only a program outside that graph can prove
+      # the install is complete. `zig build` is what produces it.
+      - name: Build and install
+        run: zig build --summary all
+
+      # A real C consumer of the installed header and archive. A declaration
+      # whose type is wrong fails to compile; a declaration the archive does
+      # not define fails to link; a rejected parse that still wrote the out
+      # parameter fails at run time.
+      #
+      # The expected values are fixed by hand here, not read out of the
+      # implementation: the two round-to-even ties are the halfway cases
+      # between 1 and its successor in binary64, written as exact decimals.
+      # 1 + 2^-53 is a tie between 1 and 1 + 2^-52 and must land on 1, whose
+      # significand is even. 1 + 3*2^-53 is a tie between 1 + 2^-52 and
+      # 1 + 2^-51 and must land on 1 + 2^-51, the one with the even
+      # significand. A parser that rounds halves away from zero passes the
+      # first and fails the second.
+      #
+      # `-lc++` is on this link line for the same reason build.zig puts
+      # link_libcpp on the artifact: the archive is compiled from C++ and may
+      # carry C++ runtime references. Linking it the way the build links it is
+      # the point of the gate.
+      - name: public C surface compiles, links and runs
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/c_surface.c" <<'C'
+          #include <fast_float_bridge.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include <math.h>
+
+          /* The bridge's status convention: both entry points return a plain
+             int, zero is success, and a rejected parse reports non-zero. The
+             header carries _Static_asserts tying 0, 1 and 2 to the
+             FF_STATUS_* enumerators, so the codes are already checked on every
+             target this file is compiled for; naming an enumerator here as
+             well would only re-pin what the header enforces. */
+          #define PARSED 0
+          #define UNUSED ((size_t)-1)
+
+          static size_t len(const char *s) { return strlen(s); }
+
+          int main(void) {
+              float f = -1.0f;
+              double d = -1.0;
+              size_t used;
+              const char *s;
+
+              /* Exactly representable, no rounding involved. `used` is the
+                 byte count of the parsed prefix, so a parser that stopped at
+                 the decimal point would pass the value check and fail this
+                 one. */
+              s = "3.5";
+              used = UNUSED;
+              if (ff_parse_f32(s, s + len(s), &f, &used) != PARSED) return 1;
+              if (f != 3.5f) return 2;
+              if (used != 3) return 3;
+
+              /* Nearest double to the decimal literal; the C literal is the
+                 same nearest double, so this compares the parser against the
+                 standard's rounding, not against itself. */
+              s = "0.1";
+              used = UNUSED;
+              if (ff_parse_f64(s, s + len(s), &d, &used) != PARSED) return 4;
+              if (d != 0.1) return 5;
+              if (used != 3) return 6;
+
+              /* Round to even, tie downward onto 1. */
+              s = "1.00000000000000011102230246251565404236316680908203125";
+              used = UNUSED;
+              if (ff_parse_f64(s, s + len(s), &d, &used) != PARSED) return 7;
+              if (d != 1.0) return 8;
+              if (used != len(s)) return 9;
+
+              /* Round to even, tie upward onto 1 + 2^-51. */
+              s = "1.00000000000000033306690738754696212708950042724609375";
+              used = UNUSED;
+              if (ff_parse_f64(s, s + len(s), &d, &used) != PARSED) return 10;
+              if (d != 0x1.0000000000002p+0) return 11;
+              if (used != len(s)) return 12;
+
+              /* A rejected parse reports failure and writes neither out
+                 parameter: f and used are both sentinels here, and a
+                 write-through on this error path is the failure this checks. */
+              s = "not a number";
+              f = -1.0f;
+              used = UNUSED;
+              if (ff_parse_f32(s, s + len(s), &f, &used) == PARSED) return 13;
+              if (f != -1.0f) return 14;
+              if (used != UNUSED) return 15;
+
+              /* Overflow is a rejection, and it is the one error path that
+                 still writes BOTH out parameters. Upstream has already called
+                 to_float by the time it reports the range failure
+                 (bridge.h:20-24, parse_number.h:289-291), so the caller's
+                 sentinel is replaced here by the infinity the parser rounded
+                 to, and out_consumed reports the bytes it took. A bridge that
+                 wrote nothing would leave the sentinel and would make
+                 "rejected" indistinguishable from "rejected and told you
+                 what", which is the ownership distinction this pins. */
+              s = "1e400";
+              d = -1.0;
+              used = 0;
+              if (ff_parse_f64(s, s + len(s), &d, &used) == PARSED) return 16;
+              if (d != INFINITY) return 17;
+              if (used != len(s)) return 18;
+
+              printf("public C surface compiled, linked and ran\n");
+              return 0;
+          }
+          C
+          zig cc -std=c11 \
+            -I zig-out/include \
+            "$RUNNER_TEMP/c_surface.c" \
+            zig-out/lib/libfast_float.a \
+            -lc++ \
+            -o "$RUNNER_TEMP/c_surface"
+          "$RUNNER_TEMP/c_surface"
+
+      # The upstream header tree is installed wholesale, and a C++ consumer of
+      # this package must keep getting `#include <fast_float/fast_float.h>`.
+      # This translation unit goes straight to upstream's C++ API without
+      # touching the bridge, so the two halves of the install are proved
+      # independently of each other.
+      - name: installed upstream C++ headers compile, link and run
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/cxx_surface.cpp" <<'CPP'
+          #include <fast_float/fast_float.h>
+          #include <fast_float_bridge.h>
+
+          #include <cstdio>
+          #include <system_error>
+
+          int main() {
+              double d = -1.0;
+              const char *s = "0.1";
+              const auto r = fast_float::from_chars(s, s + 3, d);
+              if (r.ec != std::errc()) return 1;
+              if (r.ptr != s + 3) return 2;
+              if (d != 0.1) return 3;
+
+              /* Upstream's own error code, reached without the bridge: an
+                 invalid argument surfaces as std::errc::invalid_argument, the
+                 pointer stays at the start of the input, and the value is
+                 left exactly as the successful parse above left it. */
+              s = "zzz";
+              const auto bad = fast_float::from_chars(s, s + 3, d);
+              if (bad.ec != std::errc::invalid_argument) return 4;
+              if (bad.ptr != s) return 5;
+              if (d != 0.1) return 6;
+
+              // A real bridge call also proves its C linkage from C++.
+              s = "9007199254740995";
+              size_t consumed = 0;
+              if (ff_parse_f64(s, s + 16, &d, &consumed) != 0) return 7;
+              if (consumed != 16 || d != 9007199254740996.0) return 8;
+
+              std::printf("installed upstream C++ headers compiled, linked and ran\n");
+              return 0;
+          }
+          CPP
+          zig c++ -std=c++17 \
+            -I zig-out/include \
+            "$RUNNER_TEMP/cxx_surface.cpp" \
+            zig-out/lib/libfast_float.a \
+            -o "$RUNNER_TEMP/cxx_surface"
+          "$RUNNER_TEMP/cxx_surface"
+
+  cross:
+    name: check ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every target reports. One target's failure must not hide the state of
+      # the other five.
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+          - aarch64-macos-none
+          - x86_64-windows-gnu
+          - riscv64-linux-gnu
+          - wasm32-wasi
+    steps:
+      # Shallow: compiling for a target reads no history.
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Compiled, never executed: no emulator and no cross linker is assumed.
+      # An explicit -Dtarget narrows the check to this matrix entry, so this job
+      # is one target's real attempt, not a rerun of the whole matrix under a
+      # different name.
+      #
+      # There is no `continue-on-error` and no pre-judgement in the build
+      # script. If a target cannot be built here, that is the finding, and the
+      # finding is reported rather than absorbed.
+      - name: Compile the bridge, the facade, the tests and the example
+        run: zig build check -Dtarget=${{ matrix.target }} --summary all
+
+  consumer:
+    name: downstream consumer package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # The failure this catches is the one the library's own gates cannot
+      # see: a module that builds from the inside and does not resolve from
+      # outside. consumer/ reaches the package through b.dependency() by
+      # relative path, so this needs no registry entry and no network.
+      - name: run
+        working-directory: consumer
+        run: zig build run --summary all
