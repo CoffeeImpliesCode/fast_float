@@ -23,9 +23,21 @@
 //! Each expected value is compared with an ordinary comparison and a mismatch
 //! returns an error, so the process exits non-zero. A debug assertion would be
 //! compiled out of a release build, which is not a check.
+//!
+//! ## Two configurations
+//!
+//! In a linked build the bridge is already there and nothing below asks about a
+//! provider. In a `-Druntime` build nothing is linked, so the provider is named
+//! on the command line (`--provider <path>`) or in `FASTFLOAT_PROVIDER` and
+//! loaded once before anything else, and the program says which configuration it
+//! is in the first line. Nothing is loaded by default and no other file is
+//! tried.
 
 const std = @import("std");
 const fast_float = @import("fast_float");
+
+/// A runtime-loading build has no provider until one is named.
+const ConfigurationError = error{NoProviderConfigured};
 
 /// The one literal every known answer below is about.
 const tenth = "0.1";
@@ -37,16 +49,30 @@ const tenth = "0.1";
 const tenth_bits64: u64 = 0x3FB999999999999A;
 const tenth_bits32: u32 = 0x3DCCCCCD;
 
-pub fn main() !void {
-    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+pub fn main(init: std.process.Init) !void {
+    if (comptime fast_float.runtime_loaded) {
+        try fast_float.load(.{ .path = try providerRequest(init) });
+    }
 
+    const io = init.io;
     var buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writerStreaming(io, &buffer);
     const w = &stdout.interface;
 
-    try w.print("fast_float smoke\n", .{});
+    try w.print("fast_float smoke ({s} build)\n", .{
+        if (fast_float.runtime_loaded) "runtime-loaded" else "linked",
+    });
+
+    // Which file the table was actually filled from. It is whatever this
+    // invocation named, so it is still a deterministic line of output, and it
+    // is the only place this program can show that the load really happened
+    // rather than that a linked copy answered.
+    if (fast_float.runtime_loaded) {
+        if (fast_float.loadedSource()) |source| switch (source) {
+            .path => |p| try w.print("provider: {s}\n", .{p}),
+            .system => |s| try w.print("provider: {s} (named to the platform loader)\n", .{s}),
+        };
+    }
     try w.print("parsing the literal {s} at both widths\n", .{tenth});
 
     // The exact entry points, because the buffer holds nothing but the number
@@ -166,4 +192,37 @@ pub fn main() !void {
 
     try w.print("every printed pattern is the one worked out in the comment above this file\n", .{});
     try w.flush();
+}
+
+/// The provider this run should load, from `--provider <path>` or from
+/// `FASTFLOAT_PROVIDER`.
+///
+/// Both are explicit. Nothing here looks in a default location or falls back to
+/// a linked copy: a runtime-loading build that was not told which file to load
+/// reports that it was not told, rather than loading something else.
+fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
+    const args = init.minimal.args.toSlice(init.arena.allocator()) catch
+        return noProvider();
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--provider")) {
+            if (index + 1 >= args.len) return noProvider();
+            return args[index + 1];
+        }
+    }
+    return init.environ_map.get("FASTFLOAT_PROVIDER") orelse
+        return noProvider();
+}
+
+/// Say which variable is missing. An error name on its own would send the next
+/// person into the loader instead of to the command line.
+fn noProvider() ConfigurationError {
+    std.debug.print(
+        "smoke: this is a runtime-loading build. Pass --provider <path>, or " ++
+            "export FASTFLOAT_PROVIDER with a shared object exporting ff_parse_f32 " ++
+            "and ff_parse_f64. Nothing is loaded by default and no other file is " ++
+            "tried.\n",
+        .{},
+    );
+    return error.NoProviderConfigured;
 }

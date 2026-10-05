@@ -283,12 +283,16 @@ line it did read.
 the whole build. Six matrix targets all registering `fast_float` would leave the
 last registration reachable and would silently stop checking the other five.
 
-**Decision.** `addGraph(..., public)` takes a flag. The published graph uses
-`b.addModule("fast_float", …)`, and every cross-target check uses
-`b.createModule(…)` with a private name, because a check needs the module
-compiled *for that target*, not published once. Artifact names are decorated
-per target (`fast_float-tests-x86_64-linux`), so six steps with one name do not
-make `--summary all` unreadable and do not write six objects to one cache path.
+**Decision.** `addGraph(b, target, optimize, linkage, name, public)` takes a
+flag for the module and takes the artifact name, because the two are the same
+question asked twice. The published graph uses `b.addModule("fast_float", …)`
+and the artifact name `fast_float`; every cross-target check uses
+`b.createModule(…)` and a target-decorated artifact name, because a check needs
+the module compiled *for that target*, not published once, and because six
+artifacts with one name would write six objects to one cache path and make
+`--summary all` unreadable (`fast_float-tests-x86_64-linux`). `linkage` is the
+same for all six checks as for the published graph — it is the delivery the
+build was asked for, not a per-target choice.
 
 **Also.** The check compiles `tests.zig` and `smoke.zig` for each target, not
 just the archive: Zig analyses a function body only when something calls it, so
@@ -673,3 +677,517 @@ beside it). `x86_64-linux` finished natively in 2 s and `aarch64-linux` under
 `/bin/qemu-aarch64` in 32 s, each printing all nine per-file line counts at both
 widths.
 
+---
+
+## 16. A dev shell that has to build the package is a dev shell nobody can enter
+
+**Condition.** The packaging contract asks for a per-SDK derivation consumable
+by both a flake and a devenv environment, and separately asks that entering the
+development shell not require building the SDK.
+
+**Symptom.** Not a failure — a design that looks convenient and is not. The
+obvious way to make `devenv.nix` able to answer "where is the library" is
+`packages = [ (pkgs.callPackage ./package.nix {}) ]`, which builds the C++
+bridge, the header translation and the C ABI archive before anyone gets a
+prompt. On this SDK that is a C++ compile of upstream's nine headers plus a
+`translate-c` run, per optimize mode, before a single character can be typed.
+
+**Cause.** A Nix package in `packages` is a promise to *build*, not a name to
+resolve. Evaluation is lazy, so it looks free; entering the shell is not, and
+the two are different events.
+
+**Fix.** `devenv.nix` carries tools only — `pkgs.zig_0_16` and `pkgs.pkg-config`
+— and exposes the packages as lazy `outputs.static` and `outputs.shared` rather
+than as things the shell entry builds. Building is explicit: `devenv build
+outputs.static` for the Nix package, or `devenv shell sdk:install` for a local
+`zig build install`. `flake.nix`'s `devShells.default` does the same and says in
+a comment that it is parity for a machine without devenv. Nothing is lost — the
+derivation is still reachable from the shell — it is just not the price of
+admission.
+
+**Targets bound.** `devenv` and `nix develop` shells generally, and this SDK's
+graph size. The lesson is not "keep shells small"; it is that a package listed
+in `packages` is a build obligation, and a shell that carries the SDK under
+construction is a full native build wearing a prompt.
+
+**Status.** `SOURCE-CONFIRMED` and `PENDING-VERIFICATION`. The decision is on
+paper; no `devenv shell` has been run in this workspace.
+
+---
+
+## 17. The packaging must not restate the build graph's flags
+
+**Condition.** A derivation that wraps `zig build install` is the obvious place
+to pass `-std=c++17`, an include path or a define.
+
+**Symptom.** Again a design question, not a break. Restating them is the way to
+end up with two spellings of the same fact.
+
+**Cause.** `-std=c++17` is a deliberate pin, and it is pinned for a reason
+recorded at `build_support/graph.zig:79-81` and `CHANGELOG.md` 3: it is a strict
+superset of the C++11 upstream asks for and sits below the two thresholds that
+would switch upstream's own code paths (`float_common.h:13` pulls in
+`<stdfloat>` above `__cplusplus > 202002L`; `constexpr_feature_detect.h:17`
+enables `FASTFLOAT_HAS_BIT_CAST` at `__cpp_lib_bit_cast >= 201806L`). A flag in a
+Nix file is a second copy of that decision with none of its reasoning, and it
+survives the edit that changes the original.
+
+**Fix.** `package.nix` names no C or C++ flag at all. It passes `--prefix`,
+`-Doptimize` and `-Dlinkage`, which are delivery choices, and leaves every
+compile flag to the graph that documents why it chose it.
+
+**Targets bound.** Any wrapper build file around a native graph that already
+documents its own flags. The lesson is not "never pass flags"; it is that a flag
+whose *reason* lives in one file belongs in that file, and a second copy of it is
+a second decision that will not be revisited with the first.
+
+**Status.** `SOURCE-CONFIRMED` and `PENDING-VERIFICATION`. Read out of
+`build_support/graph.zig`; no derivation has been evaluated. The half of this
+note that turned out to be wrong — where the pkg-config file and the licence
+install belong — is corrected in note 21.
+
+---
+
+## 18. Preserving an upstream README is not a licence record until the checks point at the preserved path
+
+**Condition.** The README is relocated so the repository can have a front door:
+upstream's bytes move to `README.upstream.md` and `README.md` becomes the fork's.
+
+**Symptom.** The move itself is trivial and the consequences are not. Five
+things in this repository referred to the old path by name: the provenance
+step's pinned-commit diff, its three licence-name greps, `UPSTREAM.sha256`'s
+scope paragraph, and the citations of the licence grant at
+`README.upstream.md:675-677` and the Wuffs credit at `:661-670` in
+`NOTICE.md`, `UPSTREAM.md` and `README.zig.md`. A sixth one is invisible until
+someone runs it: upstream's own `script/release.py:148-150` rewrites
+`README.md` in place to stamp a version, and after the move that is the fork's
+README.
+
+**Cause.** A file's *content* being preserved is not the same as the checks
+*following* it. `verify.yml` greps `README.md` for `LICENSE-APACHE` — after the
+move that string is still there only by accident, and the diff would have failed
+on the first word. `script/release.py` is never run by this package, so nothing
+is broken by it; it is carried unedited because it is upstream's, and the note
+exists so a re-sync does not discover the collision by running it.
+
+**Fix.** Every named reference moved to `README.upstream.md`, and the diff list
+dropped `README.md` outright rather than mapping it to the new name: the fork's
+README is expected to differ from upstream on every line, so including it would
+turn a pristine check into a guaranteed failure. The provenance step now also
+checks `FORK-LICENSE.md` for the fork's own SPDX identifier, and its
+fork-record list requires `README.md`, `README.zig.md` and `README.upstream.md`
+all to be present and non-empty, so a later relocation cannot silently drop one.
+`UPSTREAM.md` records what a re-sync must preserve. `script/release.py` is
+unchanged and its collision is documented rather than patched, because editing
+an upstream tool to suit this repository's layout is a native-source deviation
+this fork has no reason to take.
+
+**Targets bound.** Any repository that relocates a carried file whose identity
+is asserted by name elsewhere. The lesson is not "be careful with renames"; it
+is that a preserved file is only preserved once every check that names it names
+the new name, and a check that must exclude the replacement must exclude it
+explicitly rather than by omission.
+
+**Status.** `SOURCE-CONFIRMED` and `PENDING-VERIFICATION`. The edits are in the
+tree; the `provenance` job has still never been executed in this workspace.
+
+---
+
+## 19. Withdrawing an unauthorized grant does not authorize its replacement
+
+**Condition.** An earlier revision granted the fork's own files under
+Apache-2.0 alone, on the reasoning that the text already ships here. Nobody had
+authorized that, so it was withdrawn and the files were recorded as unassigned
+(`CHANGELOG.md` 13).
+
+**Symptom.** "Unassigned" reads as an open question rather than as the state it
+is, and the obvious repair — pick a term this time — is a second decision the
+owner never made.
+
+**Cause.** Withdrawing a grant removes a claim; it does not create one. A
+reader of an "unassigned" notice cannot tell whether the licence was never
+decided or the decision was merely never recorded, and either way they are left
+guessing a default.
+
+**Fix.** The owner authorized per-project licensing for fork-authored files in
+this wave, and `FORK-LICENSE.md` records the resulting grant — the same
+three-way `OR` upstream offers — together with that authorization, its SPDX
+identifier, the files it covers and the carried material it does not. Apache-2.0
+is named as the alternative this repository administers against, which keeps the
+§4 material already written true for this repository's own redistribution.
+Copyright is recorded as held by the downstream that owns the repository, with
+no individual named, because none was supplied.
+
+**Targets bound.** Any fork whose own files sat unlabelled. The lesson is not
+which term to pick; it is that the record must state the grant and the basis for
+it, and that leaving it blank is not neutrality — it pushes an invented default
+onto every reader.
+
+**Status.** `SOURCE-CONFIRMED` and `PENDING-VERIFICATION`. The authorization is
+recorded in `FORK-LICENSE.md` and `NOTICE.md`; no licence check has been run.
+
+---
+
+## 20. A target that cannot carry the requested delivery is refused, not substituted
+
+**Condition.** This package delivers either a static archive or a shared object
+from one option, `-Dlinkage=static|dynamic`, and one of the six required cross
+targets is `wasm32-wasi`, whose OS has no dynamic linker
+(`std.Target.DynamicLinker.kind` is `.none`, `lib/std/Target.zig:2385`). A
+`.so` there is a file nothing can load.
+
+**Symptom.** Not a build failure — a decision with three plausible answers, two
+of them wrong. Emit an archive silently and `-Dlinkage=dynamic` quietly means
+two things on different targets. Fail the configure and one target in six looks
+unbuildable. Drop `wasm32-wasi` from the matrix and the problem disappears
+along with the coverage.
+
+**Cause.** A substitution is a claim the caller did not ask for, made on its
+behalf and only reported in a line of build output. It also breaks the invariant
+that mattered most here: `-Dlinkage` is one option with one meaning, and the
+artifact a caller gets back is the artifact they named.
+
+**Fix — and it was not the first answer.** The first implementation delivered a
+static archive for `wasm32-wasi` under `-Dlinkage=dynamic` and printed that it
+had. That was wrong and was replaced: `-Dlinkage=dynamic` is now **refused** for
+a target that cannot carry one. `build_support/graph.zig:sharedObjectRefusal`
+returns the reason once; the build fails for the selected target naming it, and
+inside `zig build check -Dlinkage=dynamic` that one matrix cell becomes a failing
+step carrying the reason while the other five are still compiled. Nothing is
+compiled for the refused cell and nothing is relabelled. The default is untouched
+and separate: no `-Dlinkage` means `static`, which is exactly what `wasm32-wasi`
+takes, so `zig build check` with no flag still compiles all six cells.
+
+**Targets bound.** Targets whose `DynamicLinker.kind` is `.none`. The lesson is
+not "refuse more"; it is that an option whose result depends on the target has
+one meaning, and a platform property is answered by refusing the combination
+rather than by inventing a result — and that `check` is where a refusal belongs,
+because a cell that reports its own reason is coverage, where a substituted
+artifact is a claim nobody asked for.
+
+**Status.** `SOURCE-CONFIRMED` for the reason from the target definition and the
+corrected build graph. `PENDING-VERIFICATION` for the behaviour: the refusal has
+not been exercised and no shared build has been run.
+
+---
+
+## 21. One artifact, two owners: the packaging reimplemented what the build graph already knew
+
+**Condition.** The native-delivery owner took the install paths over —
+`build.zig` generates and installs `lib/pkgconfig/fast_float.pc` with
+`prefix=${pcfiledir}/../..` and installs the whole `share/licenses/fast_float/`
+set, calling `graph.addPkgConfig(b, linkage)` and `graph.installLicenceRecords(b)`
+at `build.zig:166-167`. `package.nix`, written before that landed, generated both
+itself.
+
+**Symptom.** Two records for one artifact, and the worse one would win. The
+derivation's `prefix=$out` is correct-looking and wrong: it is not relocatable,
+so moving the output breaks every path the file names, while the build graph's
+`${pcfiledir}/../..` is right in both the Zig install layout and the Nix one. And
+because the derivation's install ran after `zig build install`, it was the copy
+that survived — the relocation that made the file correct in the first place
+would have been undone by the packaging layer, silently, on every build.
+
+**Cause.** Note 17 argued half the point correctly and half wrongly. The half it
+got right: a flag whose *reason* lives in one file belongs in that file, so the
+Nix file names no compile flag. The half it got wrong: it said the pkg-config
+file and the licence install were "packaging" and therefore belonged in the
+derivation. They describe the *build graph's own* install layout — which prefix,
+which directory, which linkage the `Libs.private` line describes — so the
+derivation was a second implementation of facts the graph already owned, and a
+second implementation drifts on the first change.
+
+**Fix.** `package.nix` now runs `zig build install --prefix $out
+-Doptimize=ReleaseSafe -Dlinkage=${linkage}` and installs nothing beside it. The
+comment block that replaced the deleted code says who installs what and why a
+second copy was worse than none. `NOTICE.md` and `FORK-LICENSE.md` were corrected
+at the same time: their installed-output tables had said "the derivation does",
+and they now say `zig build install` does, for the Zig install and both Nix
+packages alike.
+
+**Targets bound.** Any wrapper that reproduces output metadata the underlying
+build graph already generates. The lesson is not "put everything in build.zig":
+a derivation legitimately owns the *prefix*, the package name, the metadata it
+adds that the graph knows nothing about, and anything the graph does not
+install. What it must not own is a second rendering of a decision the graph
+already renders — and a second rendering is not a harmless duplicate even when
+the two agree today, because the wrapper's version is the one that runs last.
+
+**Status.** `SOURCE-CONFIRMED` by reading `build.zig:166-167` and
+`build_support/graph.zig`'s `addPkgConfig` and `installLicenceRecords`.
+`PENDING-VERIFICATION` for the behaviour: neither `zig build install` nor a Nix
+derivation has been run.
+
+---
+
+## 22. An install step that exits 0 and installs nothing
+
+**Condition.** `build.zig` gained a generated `fast_float.pc` and a licence
+set, both installed with `b.addInstallFileWithDir`.
+
+**Symptom.** Observed, not predicted: `zig build install` wrote the archive and
+the headers into the prefix and neither the pkg-config file nor
+`share/licenses/fast_float/`, with exit status 0. Nothing in the build output
+mentioned it.
+
+**Cause.** `addInstallFileWithDir` only creates the `Step.InstallFile` and
+returns it; `Build.addInstallFileWithDir` does not attach it to the install step
+(lib/std/Build.zig:1717-1724), and `Step.InstallFile.create` adds only the
+source step's own dependencies (lib/std/Build/Step/InstallFile.zig:15-36). The
+archive and headers landed because they hang off the artifact's own
+`Step.InstallArtifact`. `b.installFile` is the attaching form
+(lib/std/Build.zig:1675-1677).
+
+**Fix.** Both call sites now use `b.installFile`, each carrying the reason in its
+doc comment so a later "simplification" cannot restore the silent form. The
+same defect was found in box3d, htscodecs, lua and luajit.
+
+**Targets bound.** Zig 0.16.0's `Build.addInstallFile*` family. The lesson is
+not the API — it is that an install step which runs nothing and a step which
+runs the wrong thing both exit 0, so any gate that checks exit status is blind
+to this class of defect. The probe that finds it is a listing of the prefix
+after `zig build install --prefix <scratch>/x`, not `$?`.
+
+**Status.** `SOURCE-CONFIRMED` for the cause and the fix, read out of the pinned
+standard library and of the corrected `build_support/graph.zig`.
+`PENDING-VERIFICATION` for the behaviour: the corrected install step has not
+been exercised.
+
+---
+
+## 23. Dispatch is a second option, and a provider is named or not at all
+
+**Condition.** This package publishes one C ABI and two ways to reach it: a link
+line, or a process-lifetime table that an explicit `load(source)` fills.
+`-Druntime` selects the second.
+
+**Symptom.** The design questions were: how is the provider named, and does
+`-Druntime` replace the artifact or change what `-Dlinkage` delivers?
+
+**Cause.** Both have an easy wrong answer. A default provider — a search path, a
+conventional location, a fallback to the linked copy — makes a run succeed on
+one machine and fail on another for reasons that have nothing to do with the
+code. And folding dispatch into `-Dlinkage` would leave one option meaning two
+things, which note 20 already showed is the wrong shape.
+
+**Fix.** The provider is always explicit. `smoke.zig` reads `--provider <path>`
+or `FASTFLOAT_PROVIDER`; `tests.zig` reads `FASTFLOAT_PROVIDER` and stops by
+name when it is unset; the consumer reads the same `--provider`. Nothing is
+loaded by default, no other file is tried, and there is no path-to-system
+fallback. `-Dlinkage` keeps deciding what is built and installed: under
+`-Druntime` that artifact is what a provider *is*, not something the module
+links, and the dispatch lives behind one seam in `build_support/graph.zig` so a
+linked build is unchanged in every respect.
+
+**Targets bound.** Any build offering a linked and a loaded route over the same
+artifact. The lesson is not "require a flag"; it is that a library which can load
+its implementation at run time must refuse to guess which one, because the cost
+of a wrong guess is a result that looks like a pass.
+
+**Status.** `SOURCE-CONFIRMED` for the option, the provider contract and the
+seam, read out of `build.zig`, `build_support/graph.zig`, `smoke.zig`,
+`tests.zig` and `consumer/src/main.zig`. The loader core is in this tree:
+`runtime/loader.zig`, `runtime/generate.zig`, `runtime/sync.c` and
+`runtime/sync.h` sit in `runtime/` beside `runtime/graph.zig` and
+`runtime/library.zig`, and `runtime/` is in `build.zig.zon` `.paths`. This note's
+status previously read that the core "is distributed separately, and until it
+arrives no `-Druntime` configuration compiles"; that sentence described the
+wave's ownership schedule rather than the files, it is withdrawn, and note 24
+records the correction. `PENDING-VERIFICATION` for the behaviour as of this
+note; **partly observed since** — eight `-Druntime` configurations, both
+linkages in all four optimize modes, compiled, tested, smoked and installed with
+exit 0 on 2026-10-04, each reaching the provider it was given explicitly and
+answering the whole known-answer corpus through the table. Still pending: a
+provider named by basename, a provider this tree did not build, and the
+failure, retry and idempotence paths.
+
+---
+
+## 24. A status field that described a source set the tree already carried
+
+**Condition.** `CHANGELOG.md` entry 23's bound and this file's note 23 both
+recorded the runtime loader core as distributed elsewhere, with the consequence
+that no `-Druntime` configuration could compile until it arrived. Those two
+sentences were written from the wave's division of labour and were never re-read
+against the tree.
+
+**Symptom.** Observed in the records, not in a build. `runtime/loader.zig`,
+`runtime/generate.zig`, `runtime/sync.c` and `runtime/sync.h` were present in
+`runtime/`, `runtime/` was in `build.zig.zon` `.paths`, and
+`build_support/graph.zig` imported the dispatch at the top level. Sixteen
+configurations then ran — both linkages × four optimize modes × linked and
+runtime-loaded — and every one of them was exit 0, the eight loaded cells
+answering all 1,382,483 corpus rows at both widths through a provider reached at
+run time.
+
+**Cause.** A status field is prose carrying the authority of evidence. An
+ownership assumption written into one reads as a fact about the tree, and
+everyone who quotes the record quotes it as current. Nothing in the sentence was
+a claim anyone checked, and the gate that would have exposed it did not exist
+yet — so the cheapest moment to correct it was before it was published.
+
+**Fix.** The sentence is gone from every current record. `CHANGELOG.md` entry 23
+keeps its dated bound with a pointer to entry 24, entry 24 states what ran, and
+note 23's status above names this correction instead of repeating the claim.
+`README.md` §3b and `README.zig.md`'s "Verification status" now carry the sixteen
+observed gates and the limits they do not reach.
+
+**Targets bound.** Any `SOURCE-CONFIRMED` or `PENDING-VERIFICATION` field that
+names files or a division of labour. The lesson is not "write statuses later":
+it is that a status asserting a file is *absent* is a claim about the working
+tree, so it has to be read out of the tree when it is written and re-read the
+moment the gate that would exercise it runs.
+
+**Status.** `OBSERVED` for the sixteen gates, from the `fast_float-current-*`
+rows of `local://foundation-current-native-index.json`. `PENDING-VERIFICATION`
+for everything those runs do not reach: a basename-named provider, a provider
+this tree did not build, `check`, `cross-test`, the consumers, the installed C
+and C++ surfaces, the fetched filtered package, `nix`, `devenv`, CI, and any
+reading of the shared object's export table.
+
+---
+
+## 25. A tag is not a status, and the doc comment that said otherwise was the whole defect
+
+**Condition.** The facade's `pub const Error` documentation asserted that each
+tag carried one of the bridge's three `FF_STATUS_*` values behind it, and the
+member comment for `InvalidArgument` described one thing: the format's own
+refusals. Both are exhaustive-sounding statements about all four published
+parse entry points, and both are false for two of them.
+
+**Symptom.** Read out of the source; no gate was red, and none was run.
+`parse32Exact` and `parse64Exact` are `try parse32` / `try parse64` followed by
+`if (parsed.consumed != bytes.len) return error.InvalidArgument`
+(`zig/root.zig:480`, `:488`). By the time that comparison runs, the bridge has
+already stored both out-parameters and `classify` has already returned
+`FF_STATUS_OK` (`zig/bridge.cpp:62-66`), so `parse32Exact("1.5x")` is
+`error.InvalidArgument` with `FF_STATUS_OK` behind it. A caller who
+cross-checked the tag against `c.FF_STATUS_INVALID_ARGUMENT` would be comparing
+against a status the bridge never reported.
+
+**Cause.** The error set was documented as though it were the bridge's status
+enumeration, one tag at a time. That mapping is exactly right for `parse32` and
+`parse64`, which is what made it look universal: the two entry points that
+behave differently are the ones that add a comparison of their own *after* the
+bridge has answered. An invariant that holds on the first two of four entry
+points does not decay gradually — it fails silently, and only for the callers
+who read the documentation literally.
+
+**Fix.** Two doc comments inside `pub const Error`: documentation only, no
+executable line, no signature, no member added or removed, and no new tag for
+the trailing-tail case, because the defect is the record and a fourth error name
+would replace one wrong account with a different one. `README.zig.md`'s table
+and its paragraph below already carried the per-entry-point shape and were left
+alone. `CHANGELOG.md` entry 25 holds the before-and-after text and the citations.
+
+**Targets bound.** Any error set that wraps a foreign status enumeration and
+then adds checks of its own. The lesson is not "write more documentation": it is
+that a tag answers "what did this wrapper refuse" while the foreign status
+answers "what did the callee report", and the two coincide only on the path
+where the wrapper adds nothing. Where both exist, the record has to name the
+producer, because nothing at run time can.
+
+**Status.** `SOURCE-CONFIRMED` for `zig/root.zig:480`, `:488`,
+`zig/bridge.cpp:62-66`, `zig/bridge.h:20-27` and the status pins at
+`zig/bridge.h:58-68` and `:80-84`, and for the corrected comments themselves.
+`PENDING-VERIFICATION` for behaviour: no gate was run for this correction, and
+being comment-only it should not move an existing result. Nothing here is
+observed — the claim came from reading source, including the pinned 0.16 APIs a
+throwaway probe under the workspace scratch would use, which were likewise read
+from `lib/std` and never compiled.
+
+---
+
+## 26. A task that means "this repository" has to say which repository, because the cwd is not it
+
+**Condition.** A canonical gate harness enters this SDK with
+`devenv --from path:<this repository>` and the cwd set to a scratch **project**
+directory beside it, so that `.devenv/`, the autolock and the Zig caches stay off
+the repository and its mount. That is deliberate and it is right. The trap is
+that it makes `$DEVENV_ROOT` mean the project. A task written as
+`cd "$DEVENV_ROOT"` therefore reads a directory that has no `build.zig`, no
+`UPSTREAM.sha256` and no `consumer/` in it, and every command inside it fails
+with a message about a file that demonstrably exists.
+
+**Symptom.** Two unrelated shapes of the same mistake, observed in one run over
+eighteen SDKs.
+
+* Six gates per SDK died before reaching a task at all:
+  `x Failed to get attribute 'config.cachix.enable':` … `lib = nixpkgs.lib;` …
+  `error: attribute 'lib' missing`, exit 1. `devenv.yaml` here carried
+  `flake: false`, which resolves the nixpkgs input to a bare source with no
+  `lib`. The comment above the key asserted that this "matches what devenv
+  resolves"; it does not, and the line above it that names the pin was correct.
+* Nineteen gates across ten SDKs reached their task and failed on the cwd:
+  `sha256sum: UPSTREAM.sha256: No such file or directory`,
+  `cd: consumer: No such file or directory`, and
+  `error: no build.zig file found, in the current directory or any parent
+  directories`. Same run, same cause, and it is SDK-side in every instance.
+
+**Cause.** Two different mistakes with one shape each: an input *kind* written
+from what the tool "usually" resolves rather than from what it resolves; and a
+task body that inherited its notion of "here" from the environment instead of
+stating it. A devenv task is a generated `/nix/store/…-<name>` program run
+through a shell that inherits the caller's cwd — devenv materialises scripts the
+same way — so a per-task `cwd` option would not have covered the script half
+either. The exec body has to say where it is going.
+
+**Fix.** `devenv.yaml` loses the `flake:` key and the comment that described it,
+and keeps the revision it pinned. `devenv.nix` binds `sdkRoot` and
+`consumerRoot` once, as `lib.escapeShellArg (builtins.toString ./.)`, and every
+canonical exec opens `cd ${sdkRoot} || exit 1` (or `consumerRoot`). `./.` is the
+directory of the file that writes it, so it is this SDK by construction. The
+`|| exit 1` is not decoration: a `cd` that fails and is not checked lets the
+real command run in the wrong directory, which is the failure being fixed.
+`sdk:install`, the only task that writes a delivery artefact, now takes an
+external `--prefix` under `$ZIG_LOCAL_CACHE_DIR`, falling back to
+`$TMPDIR/zig-local-cache`, keeping `PREFIX=` as the override, and refusing with a
+message rather than falling back to `zig-out/` inside the repository.
+
+**Which bodies that prefix belongs to, and which it does not.** This is the half
+of the rule that is easy to get wrong in the other direction, by stamping
+`--prefix` on every `zig build` line and changing five commands to protect one.
+Here it was settled by reading the step graph rather than by guessing:
+`b.getInstallStep().dependOn(&smoke_exe.step)` (`build.zig:204`) points *from*
+the install step *to* the smoke executable, not the other way round, so `smoke`
+(`:212`), `test` (`:245`) and `check` (`:247-257`) each reach only their own
+compile or run step, and the consumer's `run` reaches only its executable
+(`consumer/build.zig`). No `addInstallArtifact`, `b.installFile` or
+`getInstallStep().dependOn` appears inside `addTests`, `addSmoke` or
+`addTargetCheck`. So `sdk:install` is the only body that reaches an install step
+and the only one that writes a delivery output; the other four get no prefix,
+because a flag they do not need is a behaviour change disguised as a safety
+measure. Had the graph gone the other way — a `test` step that pulled in an
+install — the fix would have been a prefix on that step too, and the same read
+would have caught it.
+
+**A caveat worth naming.** `ZIG_LOCAL_CACHE_DIR` already steers `.zig-cache`
+off this repository, and `enterShell` fills it in from `XDG_CACHE_HOME` when the
+caller exported neither. That is what stops a *cache* landing on the mount. It
+does nothing for an *install prefix*: `--prefix` is a separate decision, and
+caches and delivery outputs are not the same failure.
+
+**Targets bound.** Any devenv module whose canonical entries are run from
+outside its own tree — that is the whole workspace's canonical runner — and any
+Nix module whose `devenv.yaml` declares an input *kind* rather than only a URL.
+The lesson is not "avoid `flake: false`"; it is that an input declaration and a
+task's working directory are both facts the module has to state, because nothing
+downstream will infer them correctly for it.
+
+The prefix rule is bounded the same way: any canonical body whose step closure
+reaches an install step needs an external `--prefix`, and one whose closure does
+not must not be given one. Bound to the step graph, not to the command's name —
+`zig build test` in one SDK installs and in another does not, and only the graph
+tells them apart.
+
+**Status.** `OBSERVED` for both symptoms, from the run of 2026-10-04T17:53:28Z:
+the `lib` failure in all six of this SDK's own `devenv` receipts, and the cwd
+failures in the ten sibling SDKs that got past it. `SOURCE-CONFIRMED` for this
+SDK's six `cd "$DEVENV_ROOT"` lines and for the corrected files.
+`build.zig:196-204`, `:212`, `:245`, `:247-257`, `build_support/graph.zig` and
+`consumer/build.zig` for the install-edge determination above.
+`PENDING-VERIFICATION` for the correction: no `devenv`, `nix` or `zig` command
+was run here. One question the first run must answer, because this file cannot:
+whether `builtins.toString ./.` renders as this working tree or as a store copy
+of it. Both carry the files these tasks read, but they are not the same thing,
+and only a run settles which one the wrapper received.

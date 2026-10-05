@@ -23,7 +23,9 @@
 #                                       tests.zig reads from disk: 13 data
 #                                       files (274,299,340 bytes, 5,268,191
 #                                       lines) plus the donor repository's own
-#                                       LICENSE, README.md and CMakeLists.txt.
+#                                       LICENSE, README.md and CMakeLists.txt
+#                                       that the donor repository carries in
+#                                       testdata/supplemental/.
 #                                       All sixteen are hashed, including the
 #                                       four remyoudompheng-fptest-*.txt files
 #                                       that tests.zig deliberately does not
@@ -34,18 +36,27 @@
 # The set is exactly the upstream-owned and donor-owned bytes that
 # build.zig.zon `.paths` ships AND that a build compiles or a test reads. The
 # record is deliberately not a copy of .paths: build.zig, build.zig.zon,
-# build_support/, zig/, tests.zig, smoke.zig, consumer/, the five fork records
-# and this file are all fork-authored, and the remaining carried upstream trees
+# build_support/, zig/, tests.zig, smoke.zig, consumer/, this fork's own
+# documentation records, its Nix and devenv packaging, and this file are all
+# fork-authored, and the remaining carried upstream trees
 # (benchmarks/, cmake/, ci/, docs/, script/, fuzz/, CMakeLists.txt,
 # BUILD.bazel, MODULE.bazel, .bazelrc, .clang-format,
-# clang-format-ignore.txt, AUTHORS, CONTRIBUTORS, README.md, SECURITY.md and
-# the three licence texts) are in .paths for provenance and are compiled or
-# read by nothing. Hashing files no build touches would make this a record of
-# the repository rather than of the library. The three upstream licence texts
-# are not byte-hashed here on purpose: .github/workflows/verify.yml's
-# provenance job already diffs LICENSE-APACHE, LICENSE-BOOST, LICENSE-MIT
-# against the pinned commit by name, so a change to any of them fails a gate
-# that this record cannot. The donor corpus licence,
+# clang-format-ignore.txt, AUTHORS, CONTRIBUTORS, README.upstream.md,
+# SECURITY.md and the three licence texts) are in .paths for provenance and are
+# compiled or read by nothing. Hashing files no build touches would make this a
+# record of the repository rather than of the library.
+#
+# README.upstream.md is upstream's own README, preserved byte for byte under a
+# new name so that README.md could be given to this fork. It is on the
+# provenance-only list above for the same reason as the rest of it, and unlike
+# the three licence texts it is not byte-hashed here because
+# .github/workflows/verify.yml diffs it against the pinned commit by name,
+# which is a stronger statement than a digest of this working tree.
+#
+# The three upstream licence texts are not byte-hashed here on purpose, for that
+# same reason: verify.yml's provenance job diffs LICENSE-APACHE,
+# LICENSE-BOOST and LICENSE-MIT against the pinned commit by name, so a change
+# to any of them fails a gate that this record cannot. The donor corpus licence,
 # testdata/supplemental/LICENSE, IS hashed, because no gate compares it.
 #
 # Deliberately absent, each for a stated reason:

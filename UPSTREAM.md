@@ -20,16 +20,19 @@ Where each of those comes from, read out of the carried tree:
   `FASTFLOAT_VERSION_PATCH 0`. It is the version of the C++ library, not a
   version of the Zig wrapper, and it is what `build.zig.zon` carries in
   `.version`.
-* The licence triple is `README.md:675-677`: "Licensed under either of … Apache
+* The licence triple is `README.upstream.md:675-677`: "Licensed under either of … Apache
   License, Version 2.0 … or MIT license … or BOOST license". All three texts
   ship, unedited and distinct: `LICENSE-APACHE`, `LICENSE-MIT`, `LICENSE-BOOST`.
   Upstream puts no per-file notice in its headers, so the grant itself lives
   only in that README line, which is why the README travels with the package.
+  Since this repository's README relocation, "that README" is
+  `README.upstream.md`, and it travels because dropping it would drop the only
+  place the grant is stated.
 * The copyright line is the one the two licence texts carry for themselves
   (`LICENSE-APACHE:178`, `LICENSE-MIT:3`): "Copyright 2021 The fast_float
   authors". `AUTHORS` names Daniel Lemire and João Paulo Magalhaes;
   `CONTRIBUTORS` names eleven further people.
-* `README.md:661-670` also records two credits that are not the same as a
+* `README.upstream.md:661-670` also records two credits that are not the same as a
   licence grant and are not lost: the library "includes code adapted from
   Google Wuffs (written by Nigel Tao) which was originally published under the
   Apache 2.0 license", and Rémy Oudompheng's fast path for long digits is
@@ -148,7 +151,7 @@ Everything named in `build.zig.zon` `.paths` that this fork did not write:
 | `tests/` | upstream's own C++ test suite, carried whole. Nothing in it is built by this package and none of it is deleted; it needs a C++11 test framework that is not vendored here |
 | `testdata/` | the independent known-answer corpus above — Apache-2.0, **not** under upstream's triple — plus the fork's `testdata/README.md` describing it. Of the sixteen vendored files, fifteen are donor bytes and one, the licence text, was separately sourced |
 | `LICENSE-APACHE`, `LICENSE-BOOST`, `LICENSE-MIT` | upstream's three licence texts, verbatim and distinct |
-| `README.md` | upstream's project README, which carries the triple licence grant and the Wuffs credit |
+| `README.upstream.md` | upstream's project README, byte for byte, `sha256 80d3197381d1a3fe7de55ac450e62b89a6d7141069b88eeca645f0543a6b2a3b`; it carries the triple licence grant and the Wuffs credit. `README.md` in this repository is the fork's own README, authored here |
 | `benchmarks/`, `cmake/`, `ci/`, `docs/`, `script/`, `fuzz/` | upstream's benchmarks, CMake packaging, CI script, project page, release and analysis tooling, and fuzz driver, carried so the package is upstream's tree plus this fork's Zig graph rather than a subset of it |
 | `CMakeLists.txt`, `BUILD.bazel`, `MODULE.bazel`, `.bazelrc`, `.clang-format`, `clang-format-ignore.txt`, `AUTHORS`, `CONTRIBUTORS`, `SECURITY.md` | upstream's own build definitions, formatting config, authorship record and security contact |
 
@@ -233,6 +236,36 @@ who fetched the package would not have received the record. `build.zig.zon`
 check travels with the package. `CHANGELOG.md` entry 9 and `FORK-NOTES.md`
 note 9b recorded it as outstanding; both are closed.
 
+**The README relocation, and what a re-sync must preserve.** Upstream's README
+is `README.upstream.md` here, byte for byte, and this repository's `README.md` is
+the fork's own. The digest above is the proof that the preserved copy is still
+upstream's bytes; re-read it after any re-sync rather than trusting the file
+name. Three things follow for `.paths`: `README.upstream.md` has to be listed or
+a fetched package loses the only statement of the grant, and `README.md` has to
+be listed too because the fork's own README is the file a consumer reads first.
+The provenance step in `.github/workflows/verify.yml` diffs
+`README.upstream.md` against the pinned commit, not `README.md` — diffing the
+fork's file would fail on the first word.
+
+**Upstream's release script and this layout.** `script/release.py` rewrites
+`README.md` in place to stamp a new version. In this repository that path is the
+fork's README, so the script would edit the wrong file; the preserved copy is
+`README.upstream.md`. Nothing in this package runs upstream's release tooling,
+so nothing is broken by it, and the script is carried unedited because it is
+upstream's. A future re-sync that wants to run it must be told the path.
+
+**Packaging added by this fork.** `package.nix` is a source-only derivation that
+both `flake.nix` and `devenv.nix` consume; `flake.nix` exposes `static` and
+`shared` packages built from it and a toolchain-only development shell;
+`devenv.nix`, `devenv.yaml` and `.envrc` are the canonical development
+environment. None of them restates a C or C++ flag, none imports a sibling, and
+none fetches anything at build time: the native closure is upstream's nine
+headers plus `zig/bridge.cpp`, and the native build graph in
+`build_support/graph.zig` owns how they are compiled. The Nix output installs
+that compiled archive, the bridge header, the whole upstream header tree, a
+pkg-config file and the full licence set; it does **not** install the 262 MB
+known-answer corpus, which is test input rather than installed data.
+
 ## Synchronising with a new upstream release
 
 1. `git fetch upstream`, then check out the new tag and read
@@ -240,8 +273,8 @@ note 9b recorded it as outstanding; both are closed.
    the tag spelling, are the version.
 2. Replace `include/` and `tests/` wholesale from the new commit. Do not
    hand-patch upstream files to make a build problem go away.
-3. Copy `LICENSE-APACHE`, `LICENSE-BOOST`, `LICENSE-MIT` and `README.md` from
-   the new commit if they changed, and re-read the licence grant there.
+3. Copy `LICENSE-APACHE`, `LICENSE-BOOST`, `LICENSE-MIT` and `README.upstream.md`
+   from the new commit if they changed, and re-read the licence grant there.
 4. Refresh `UPSTREAM.sha256` over the same path set and bump the record count
    and the byte totals in its header comment if either moved. The donor corpus
    in `testdata/supplemental/` is a separate repository: bump it only by
@@ -258,6 +291,11 @@ note 9b recorded it as outstanding; both are closed.
 
 ## See also
 
+* `FORK-LICENSE.md` — the actual grant for the files this fork authored, the
+  owner's authorization for it, and what it does not cover.
+* `README.md` — the fork's README: native-source deviations, native-build
+  deviations and dated history, the current build/run/test matrix, then
+  consumption.
 * `NOTICE.md` — attribution, the licence choice, every file this fork adds or
   edits, and the obligations that apply to them.
 * `README.zig.md` — how to build, import and call the package, and the observed

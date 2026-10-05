@@ -43,3 +43,17 @@ zig-out/
 consumer/.zig-cache/
 consumer/zig-cache/
 consumer/zig-out/
+
+# Nix and devenv working-tree artefacts. `nix build` writes `result` into the
+# directory that asked for it, and `result-1`, `result-2`, ... on a rebuild;
+# `devenv` writes its resolved inputs and its state beside the project. None of
+# them is named in build.zig.zon `.paths`, so an ignored path can never become
+# part of the package. `flake.lock` and `devenv.lock` are deliberately *not*
+# here: they are real inputs, they belong to the driver, and ignoring them would
+# be the wrong way to keep a build out of a commit.
+result
+result-*
+.devenv/
+.devenv.flake.nix
+.devenv.flakes/
+devenv.local.nix

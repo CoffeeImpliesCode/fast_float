@@ -72,6 +72,17 @@
         "LICENSE-APACHE",
         "LICENSE-BOOST",
         "LICENSE-MIT",
+        // `FORK-LICENSE.md` and `README.upstream.md` are installed beside the
+        // binary (`build_support/graph.zig:licence_records`), and a file the
+        // install names has to be inside `.paths` or a fetched copy of this
+        // package would fail to install at all. Upstream's own README is here
+        // for the same reason it is in the install: it is where upstream
+        // states its three grants, so it is a licence record and not merely
+        // documentation. `UPSTREAM.sha256` is not installed and does not need
+        // to travel with a binary that ships no upstream source; it is checked
+        // in the source tree, where `zig build test` reads its fixtures.
+        "FORK-LICENSE.md",
+        "README.upstream.md",
         // This fork's records.
         "UPSTREAM.md",
         "UPSTREAM.sha256",
@@ -79,9 +90,45 @@
         "CHANGELOG.md",
         "FORK-NOTES.md",
         "README.zig.md",
+        // The runtime-loading route, which `build_support/graph.zig` imports
+        // unconditionally: `runtime/graph.zig` is named at the top level of that
+        // file, and in a linked build it supplies the `rt` module the facade
+        // imports for its two public types. A fetched copy of this package that
+        // did not carry `runtime/` would fail to configure at all, so the
+        // directory is part of the package rather than an optional extra.
+        "runtime",
+        // Standalone Nix packaging. `package.nix` is the one source-only
+        // derivation and builds the `static` and `shared` variants of this same
+        // tree; `flake.nix` exposes them; `devenv.nix`, `devenv.yaml` and
+        // `.envrc` provide the canonical development shell.
+        //
+        // `flake.lock` is listed because it exists in this tree and is a real
+        // input rather than a build product: it pins exactly the
+        // `github:NixOS/nixpkgs/c7def046b9a883d46974757852106483d741586f` that
+        // `flake.nix:6-7` declares, and `.gitignore:52-54` deliberately does not
+        // ignore it for that reason. A dependent that received the flake
+        // without its lock would resolve whatever nixpkgs the machine had
+        // instead of the one this SDK's `pkgs.zig_0_16` names.
+        //
+        // `devenv.lock` is absent and stays absent: it is not in this tree, and
+        // naming a path that is not there would make `zig fetch` hash a missing
+        // entry. `devenv.yaml:7-9` states what that lock must pin when the
+        // driver creates it.
+        "package.nix",
+        "flake.nix",
+        "flake.lock",
+        "devenv.nix",
+        "devenv.yaml",
+        ".envrc",
+        // .zig-cache/, zig-out/, consumer's caches, the Nix `result` symlink and
+        // the devenv working-tree artefacts are deliberately absent: build
+        // outputs, a fetched package tree and shell state are not part of a
+        // package. See .gitignore.
         // The separate consumer package. It lives inside this repository so
         // its dependency on this package resolves as a relative path, with no
         // registry entry and no network fetch.
-        "consumer",
+        "consumer/build.zig",
+        "consumer/build.zig.zon",
+        "consumer/src/main.zig",
     },
 }

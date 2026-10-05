@@ -20,9 +20,21 @@
 //! No input is read from anywhere: the table is compiled in, so the program's
 //! output is the same on every run and on every machine, which is what makes it
 //! usable as a check rather than as a demonstration.
+//!
+//! ## Two configurations
+//!
+//! In a linked build the bridge arrives with the module and the program below is
+//! the whole consumer. In a `-Druntime` build nothing is linked, so the provider
+//! is named on the command line (`--provider <path>`) or in
+//! `FASTFLOAT_PROVIDER`, loaded once before anything else, and the same
+//! published answers follow. The difference is one branch and no duplicated
+//! program: nothing is loaded by default and no other file is tried.
 
 const std = @import("std");
 const fast_float = @import("fast_float");
+
+/// A runtime-loading build has no provider until one is named.
+const ConfigurationError = error{NoProviderConfigured};
 
 /// One decimal constant and the two IEEE 754 patterns it must produce.
 const Constant = struct {
@@ -129,8 +141,15 @@ const measurement_bits64: u64 = 0x40239D013A92A305;
 /// The unparsed suffix includes the space separating the number from its unit.
 const measurement_suffix = " m/s^2";
 
-pub fn main() !void {
-    std.debug.print("fast_float consumer, {d} constants\n", .{constants.len});
+pub fn main(init: std.process.Init) !void {
+    if (comptime fast_float.runtime_loaded) {
+        try fast_float.load(.{ .path = try providerRequest(init) });
+    }
+
+    std.debug.print("fast_float consumer ({s} build), {d} constants\n", .{
+        if (fast_float.runtime_loaded) "runtime-loaded" else "linked",
+        constants.len,
+    });
 
     for (constants) |constant| {
         // The exact entry points, because each `text` holds nothing but the
@@ -219,4 +238,36 @@ pub fn main() !void {
         "every pattern above is the one worked out by exact rounding in the comment on each entry\n",
         .{},
     );
+}
+
+/// The provider this run should load, from `--provider <path>` or from
+/// `FASTFLOAT_PROVIDER`.
+///
+/// Both are explicit. Nothing here looks in a default location, and a build that
+/// was not told which file to load says so rather than loading something else.
+fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
+    const args = init.minimal.args.toSlice(init.arena.allocator()) catch
+        return noProvider();
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--provider")) {
+            if (index + 1 >= args.len) return noProvider();
+            return args[index + 1];
+        }
+    }
+    return init.environ_map.get("FASTFLOAT_PROVIDER") orelse
+        return noProvider();
+}
+
+/// Say which variable is missing. An error name on its own would send the next
+/// person into the loader instead of to the command line.
+fn noProvider() ConfigurationError {
+    std.debug.print(
+        "consumer: this is a runtime-loading build. Pass --provider <path>, or " ++
+            "export FASTFLOAT_PROVIDER with a shared object exporting ff_parse_f32 " ++
+            "and ff_parse_f64. Nothing is loaded by default and no other file is " ++
+            "tried.\n",
+        .{},
+    );
+    return error.NoProviderConfigured;
 }

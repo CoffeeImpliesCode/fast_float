@@ -26,6 +26,16 @@
 //! typed surface deliberately withholds the value of an out-of-range parse, and
 //! the corpus records the bit pattern such a parse has to end up with, so the
 //! only place that value can be read is the raw call.
+//!
+//! ## The provider, in a runtime-loading build
+//!
+//! A `-Druntime` build links no bridge, so every test below reaches the library
+//! through the loader and nothing works until a provider has been named. It is
+//! named by `FASTFLOAT_PROVIDER`, an absolute path to a shared object or import
+//! library exporting `ff_parse_f32` and `ff_parse_f64`. Nothing is loaded by
+//! default and no other file is tried: a build that was not told which file to
+//! load stops with the variable's name rather than reporting a failure that
+//! says nothing about the reason. In a linked build the variable is never read.
 
 const std = @import("std");
 const fast_float = @import("fast_float");
@@ -33,6 +43,49 @@ const fast_float = @import("fast_float");
 /// Where the build put the fixture corpus. Relative to the build root, which is
 /// the working directory a `Step.Run` with no explicit cwd inherits.
 const paths = @import("fast_float_paths");
+
+/// A shared object exporting `ff_parse_f32` and `ff_parse_f64`, named by the
+/// environment in a runtime-loading build.
+const provider_variable = "FASTFLOAT_PROVIDER";
+
+/// Make the native library usable, once, before a test calls the facade.
+///
+/// Safe to call from every test: the loader's contract makes the same request
+/// idempotent and keeps the handle to the end of the process. `loadedSource` is
+/// what makes the second and later calls free of work, so the corpus below —
+/// which asks for the library once per line, millions of times — pays for the
+/// load once and for an acquire load per call after that, which is the same
+/// check every routed call makes anyway.
+fn nativeReady() void {
+    if (comptime !fast_float.runtime_loaded) return;
+    if (fast_float.loadedSource() != null) return;
+
+    var buffer: [4096]u8 = undefined;
+    const value = std.testing.environ.getAlloc(std.testing.allocator, provider_variable) catch
+        missingProvider();
+    defer std.testing.allocator.free(value);
+    if (value.len == 0 or value.len > buffer.len) missingProvider();
+    @memcpy(buffer[0..value.len], value);
+    fast_float.load(.{ .path = buffer[0..value.len] }) catch |err| {
+        std.debug.print(
+            "tests.zig: loading " ++ provider_variable ++ " = \"{s}\" failed: {t}\n",
+            .{ buffer[0..value.len], err },
+        );
+        @panic("tests.zig: the provider named by " ++ provider_variable ++
+            " did not load; nothing below this line ran");
+    };
+}
+
+fn missingProvider() noreturn {
+    @panic(
+        "tests.zig: this is a runtime-loading build and " ++ provider_variable ++
+            " is not set. Point it at a shared object exporting ff_parse_f32 and " ++
+            "ff_parse_f64, for example the one `zig build -Dlinkage=dynamic " ++
+            "-Doptimize=Debug` installs, and export it for the whole `zig build` " ++
+            "invocation: the build cannot inject a path into a run step's " ++
+            "environment.",
+    );
+}
 
 /// The corpus files this fork reads, with the line count each one has.
 ///
@@ -308,6 +361,7 @@ fn checkFile(dir: std.Io.Dir, file: []const u8, expected_lines: usize) !void {
 }
 
 test "every selected corpus file matches its recorded bit patterns at both widths" {
+    nativeReady();
     const io = std.testing.io;
     var dir = try std.Io.Dir.cwd().openDir(io, paths.data_dir, .{});
     defer dir.close(io);
@@ -322,6 +376,7 @@ test "every selected corpus file matches its recorded bit patterns at both width
 // ---------------------------------------------------------------------------
 
 test "one tenth is the same double and float whatever else is true of them" {
+    nativeReady();
     // 1/10 has no binary expansion, so both widths round. The nearest double to
     // 1/10 has significand 0x9999999999999 and exponent 3 less than the bias,
     // giving 0x3FB999999999999A; the nearest float has significand 0xCCCCCD and
@@ -336,6 +391,7 @@ test "one tenth is the same double and float whatever else is true of them" {
 }
 
 test "a halfway decimal rounds to even, and the next decimal up does not" {
+    nativeReady();
     // The two doubles bracketing 1.0 are 1.0 and 1 + 2^-52. Their exact
     // midpoint is 1 + 2^-53, whose exact decimal expansion has 53 fractional
     // digits and terminates. At a tie, round-to-nearest-ties-to-even picks the
@@ -370,6 +426,7 @@ test "a halfway decimal rounds to even, and the next decimal up does not" {
 }
 
 test "more digits than the significand can hold change the answer only when they should" {
+    nativeReady();
     // 2^53 is the last integer a double holds exactly; the gap above it is 2, so
     // 2^53 + 1 is not representable and rounds back down to 2^53.
     // 9007199254740995 is 2^53 + 3, which sits exactly halfway between the
@@ -395,6 +452,7 @@ test "more digits than the significand can hold change the answer only when they
 }
 
 test "the largest finite value is in range and the next decimal out is not" {
+    nativeReady();
     // The largest finite double is (2^53 - 1) * 2^971, and the shortest decimal
     // that still rounds to it is 1.7976931348623157e308. It is in range, so the
     // typed surface answers with a value.
@@ -425,6 +483,7 @@ test "the largest finite value is in range and the next decimal out is not" {
 }
 
 test "the smallest subnormal is in range and half of it is not" {
+    nativeReady();
     // The smallest positive subnormal double is 2^-1074, and its shortest
     // decimal is 4.9406564584124654e-324. It is representable, so it is a
     // success with a nonzero value.
@@ -456,6 +515,7 @@ test "the smallest subnormal is in range and half of it is not" {
 }
 
 test "the boundary between subnormal and normal is a step, not a slope" {
+    nativeReady();
     // The largest subnormal double is (2^52 - 1) * 2^-1074 and the smallest
     // normal is 2^52 * 2^-1074, one unit apart at that exponent. Four
     // seventeen-digit decimals, the two either side of the boundary: the
@@ -473,6 +533,7 @@ test "the boundary between subnormal and normal is a step, not a slope" {
 }
 
 test "an out-of-range parse still consumed the whole number and stored the rounded value" {
+    nativeReady();
     // The typed surface reports the condition and withholds the value, so the
     // value is read through the raw call, where it is visible. `1e681` rounds to
     // infinity at double width, and the corpus records that decimal as
@@ -504,6 +565,7 @@ test "an out-of-range parse still consumed the whole number and stored the round
 }
 
 test "a parse that matches nothing leaves the caller's out-parameters unwritten" {
+    nativeReady();
     // The bridge promises that `*out_value` and `*out_consumed` are not touched
     // on `invalid_argument`, because upstream returns before storing anything.
     // The sentinel values below are the caller's own, and reading them back is
@@ -515,6 +577,20 @@ test "a parse that matches nothing leaves the caller's out-parameters unwritten"
     try std.testing.expectEqual(fast_float.c.FF_STATUS_INVALID_ARGUMENT, code);
     try std.testing.expectEqual(@as(u64, 0xDEADBEEFCAFEF00D), @as(u64, @bitCast(value)));
     try std.testing.expectEqual(@as(usize, 0x5EED5EED), consumed);
+
+    // The same promise for the empty range, which is the one a binding is most
+    // likely to break: `first` and `last` are the same address, so nothing
+    // forms a pointer difference over a buffer that owns no bytes, and upstream
+    // compares the two before reading either (`parse_number.h:332-336`). The
+    // sentinels are fresh so that this is its own observation rather than a
+    // repeat of the one above.
+    var empty_value: f32 = @bitCast(@as(u32, 0xFEEDFACE));
+    var empty_consumed: usize = 0x0BADF00D;
+    const nothing: []const u8 = "";
+    const empty_code = fast_float.c.ff_parse_f32(nothing.ptr, nothing.ptr, &empty_value, &empty_consumed);
+    try std.testing.expectEqual(fast_float.c.FF_STATUS_INVALID_ARGUMENT, empty_code);
+    try std.testing.expectEqual(@as(u32, 0xFEEDFACE), @as(u32, @bitCast(empty_value)));
+    try std.testing.expectEqual(@as(usize, 0x0BADF00D), empty_consumed);
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +598,7 @@ test "a parse that matches nothing leaves the caller's out-parameters unwritten"
 // ---------------------------------------------------------------------------
 
 test "a prefix of the buffer is a parse, and the whole buffer is a stricter one" {
+    nativeReady();
     // `from_chars` consumes what it recognised and stops, which is the contract
     // `parse32` and `parse64` report. The number here is "1.5" and the rest is
     // not part of it.
@@ -556,10 +633,14 @@ test "a prefix of the buffer is a parse, and the whole buffer is a stricter one"
 }
 
 test "the format refuses what the standard's from_chars refuses" {
-    // C++17 20.19.3.(7.1) forbids a leading `+`, and forbids skipping leading
-    // whitespace; upstream quotes exactly that rule at `parse_number.h:31` and
-    // `fast_float.h:11-15`. Each of these is `invalid_argument` at both widths
-    // and through the exact entry points too.
+    nativeReady();
+    // C++17 20.19.3.(7.1) forbids a leading `+` and forbids skipping leading
+    // whitespace, and this format opts into neither: `chars_format::general` is
+    // `fixed | scientific` (`float_common.h:56`) and carries neither the
+    // `allow_leading_plus` bit (`:57`, consulted at `ascii_number.h:354-358`)
+    // nor the `skip_white_space` bit (`:58`, consulted at
+    // `parse_number.h:327-331`). Each of these is `invalid_argument` at both
+    // widths and through the exact entry points too.
     const refused = [_][]const u8{
         "", // nothing at all
         " ", // whitespace only
@@ -590,12 +671,12 @@ test "the format refuses what the standard's from_chars refuses" {
     // explicitly empty slice rather than a string literal, which is how a caller
     // holding a buffer it has just drained arrives here.
     const empty: []const u8 = "";
-    try std.testing.expectEqual(@as(usize, 0), empty.len);
     try std.testing.expectError(error.InvalidArgument, fast_float.parse64(empty));
     try std.testing.expectError(error.InvalidArgument, fast_float.parse32(empty));
 }
 
 test "infinity and not-a-number parse, and a negative zero keeps its sign" {
+    nativeReady();
     // `chars_format::general` is fixed or scientific with no `no_infnan` bit, so
     // upstream's `parse_infnan` path (`parse_number.h:22-71`) accepts these. They
     // are successes, not errors, which is upstream's behaviour and the reason a
@@ -651,6 +732,7 @@ test "infinity and not-a-number parse, and a negative zero keeps its sign" {
 }
 
 test "the decimal point and the exponent are the ones the corpus was written with" {
+    nativeReady();
     // A leading dot is a number with an empty integer part, which this format
     // accepts; a trailing dot is a number with an empty fraction, which it also
     // accepts. Both spellings appear in the corpus, in `google-wuffs.txt` and

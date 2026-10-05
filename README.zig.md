@@ -1,35 +1,61 @@
 # fast_float — the C++ correctly-rounded parser, built and wrapped in Zig
 
 This package compiles fast_float **8.3.0** — upstream's own header-only C++,
-byte for byte, from the `include/` directory in this repository — into a static
-C ABI archive with real external linkage, and publishes a small, allocation-free
-Zig facade over the translated bridge header. No part of the parser is
-reimplemented, nothing is downloaded at build time, and there is no dependency
-of any kind in `build.zig.zon`.
+byte for byte, from the `include/` directory in this repository — into a C ABI
+archive with real external linkage — static by default, shared on request — and
+publishes a small, allocation-free Zig facade over the translated bridge header.
+No part of the parser is reimplemented, nothing is downloaded at build time, and
+there is no dependency of any kind in `build.zig.zon`.
 
 Upstream: `https://github.com/fastfloat/fast_float`, tag `v8.3.0`, commit
 `b0ab987b3dfdde13fa1915f65ef2a5c068d9208c`. Provenance, licences and the
 integrity record are in [`UPSTREAM.md`](UPSTREAM.md), [`NOTICE.md`](NOTICE.md)
 and [`UPSTREAM.sha256`](UPSTREAM.sha256).
 
+This file documents the **Zig interface**. The repository's front door is
+[`README.md`](README.md), which carries the native-source deviations, the
+native-build deviations and their dated history, the current build/run/test
+matrix and the consumption routes; upstream's own README is preserved beside it
+at [`README.upstream.md`](README.upstream.md), byte for byte. The fork's own
+files are licensed `Apache-2.0 OR MIT OR BSL-1.0` on the owner's
+authorization — [`FORK-LICENSE.md`](FORK-LICENSE.md) — and the corpus below is
+under its own single Apache-2.0 grant.
+
 ## Requirements
 
 Zig **0.16.0** — the real compiler, not the bare `zig` on `PATH`, which in
 this workspace is a version dispatcher; through the dispatcher the command is
-`zig 0.16.0 build`. Plus a C++ compiler and libc++/libstdc++, both of which
+`zig 0.16.0 build`. That is the same line `build.zig.zon` states as
+`minimum_zig_version`, so a package manager that enforces the floor enforces
+this compiler. Plus a C++ compiler and libc++/libstdc++, both of which
 Zig supplies. Nothing is fetched.
+
+The C++ standard is pinned to `-std=c++17` in `build_support/graph.zig`, and
+it is pinned rather than preferred; the two upstream thresholds that make a
+different standard mean different code are named under "Build modes" below.
+A dependent that reaches the library through `dep.module("fast_float")` gets
+the compiled archive, libc and the C++ runtime linked with it. A C or C++
+consumer of the installed tree links the archive itself; `zig build install`
+also generates `lib/pkgconfig/fast_float.pc`, whose `Libs.private` names the C++
+runtime for a static delivery and is empty for a shared one that has it linked
+in. The installed-surface check in `.github/workflows/verify.yml` builds against
+the installed headers and the archive directly, not through that file.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `zig build` | compiles upstream's headers through the C++ bridge, installs `libfast_float.a`, `fast_float_bridge.h` and the whole upstream header tree into `zig-out/`, and compiles the example |
+| `zig build` | compiles upstream's headers through the C++ bridge, installs the C ABI archive in the default static linkage, `fast_float_bridge.h`, the whole upstream header tree, the generated `fast_float.pc` and the licence records into `zig-out/`, and compiles the example |
 | `zig build test` | runs `tests.zig` for the selected target: the nine-file known-answer corpus at both widths, plus the hand-worked cases |
 | `zig build test -Doptimize=ReleaseSafe` | the same tests with the optimizer on |
 | `zig build smoke` | runs `smoke.zig`, which checks its own answers and exits non-zero on any mismatch |
 | `zig build check -Dtarget=<triple>` | compiles the C++ bridge, the translated header, the facade, the tests and the example for one target, running nothing |
 | `zig build check` | the same for all six required targets in one graph |
 | `cd consumer && zig build run` | the same library, consumed by a package that did not write it |
+| `zig build -Dlinkage=static` | the default, stated explicitly: a static `libfast_float.a`. This is what the package has always produced |
+| `zig build -Dlinkage=dynamic` | a real shared object with external linkage — `libfast_float.so.0.1.0` with soname `libfast_float.so.0` beside it on ELF, `libfast_float.0.dylib` on Darwin, `fast_float.dll` plus `fast_float.lib` on windows-gnu. Same tree, same bridge, same C ABI. **One refused combination:** `wasm32-wasi` has no dynamic linker, so the build fails for it rather than substituting an archive |
+| `zig build -Druntime` | default off. Builds the same facade over a dispatch that resolves the bridge's entry points at run time through one table an explicit `load(source)` fills. The artifact is still built and installed — it is what a provider is |
+| `zig build smoke -Druntime -- --provider <path>` | runs the smoke example against a named provider; `--provider` or `FASTFLOAT_PROVIDER` both work, and nothing is loaded by default |
 
 Add `-j8 --summary all`, and `--cache-dir <dir>`, as your workspace does.
 
@@ -47,9 +73,15 @@ zig build check -Dtarget=wasm32-wasi -j8 --summary all --cache-dir /home/tmp/ger
 
 `zig build check` with no `-Dtarget` walks all six in one graph. Compiled, never
 executed: no emulator and no cross linker is assumed, so a green target is
-compile evidence and nothing more. **All six have been compiled in this
-workspace and all six passed** — one command each, 7/7 steps, no target
-skipped and none pre-judged; see "Verification status" for the receipts.
+compile evidence and nothing more. **All six were compiled and all six passed**
+on the tree as it stood on 2026-10-02 — one command each, 7/7 steps, no target
+skipped and none pre-judged — and the same six are green on the current tree as
+well: row `baseline-fast_float-check` of
+`baselines-and-configs/20261005T014547Z-797a73f2`, 2026-10-05, exit 0,
+`Build Summary: 32/32 steps succeeded`, `declared_target_count 6`, all six
+triples named in the run's own step lines and `test_pass_lines: []`. That row
+runs nothing. Both receipts are named in "Verification status"; neither is a
+runtime result, and no row of either may be read as one.
 
 ### The full platform matrix
 
@@ -134,13 +166,20 @@ const small: f32 = try fast_float.parse32Exact("0.1");
 
 // The error set, when a caller has to handle refusal.
 const parsed = fast_float.parse64("not a number") catch |err| switch (err) {
-    error.InvalidArgument => return,   // nothing matched; nothing was written
+    error.InvalidArgument => return,   // nothing matched; no result is returned
     error.ResultOutOfRange => return,  // it matched, and rounded to inf or 0
     error.StatusNotRecognised => unreachable, // the bridge pins its own codes
 };
 ```
 
 `consumer/` is exactly this, in working form.
+
+That is the whole supported route for a Zig dependent: `b.dependency` and
+`dep.module("fast_float")`, with `c` bound and the archive linked for you.
+`pub const c` is a supported second route into the same bridge and carries its
+own obligations, named under "The C ABI" below. There is no per-target module
+name and no relative-import route, so reaching into `zig/root.zig` by path is
+not one of them.
 
 ## The API
 
@@ -149,6 +188,13 @@ one's documentation comment in `zig/root.zig` cites the header and line it came
 from. The scope is deliberately narrow: `fast_float::from_chars` for `float` and
 `double`, in `chars_format::general`, which is the default upstream instantiates
 (`include/fast_float/fast_float.h:33-37`).
+
+What it deliberately leaves out: no allocator, no integer parsing, no
+`chars_format` or `parse_options` selection, no formatting, and no
+rounding-mode setting. Upstream reaches all of those through
+`from_chars_advanced` and the integer overloads in the installed C++ header
+tree, which is where they stay: they are templates, so there is no symbol a C
+translation could name and this binding would have nothing to call.
 
 | Operation | What it does |
 |---|---|
@@ -170,17 +216,19 @@ which is how `std::from_chars` reports it too: the number is a prefix, and
 the following is upstream's behaviour, not this package's:
 
 * **No leading whitespace and no leading `+`.** `" 1"`, `"\t1"` and `"+1"` are
-  all `error.InvalidArgument`. `from_chars` differs from `strtod` here on
-  purpose: `include/fast_float/fast_float.h:11-15` says so, and
-  `include/fast_float/parse_number.h:31` quotes C++17 20.19.3.(7.1), which
-  forbids a `+` at this position. This is a deliberate difference from every
-  C-locale conversion function, and a caller porting from `strtod` has to
-  pre-strip.
+  all `error.InvalidArgument`. Unlike this parser, `strtod` accepts leading
+  whitespace and `+`. `chars_format::general` explains the difference:
+  `include/fast_float/float_common.h:56` defines it as `fixed | scientific` and
+  nothing else, so neither the `skip_white_space` bit (`:58`, consulted at
+  `include/fast_float/parse_number.h:327-331`) nor the `allow_leading_plus` bit
+  (`:57`, consulted at `include/fast_float/ascii_number.h:354-358` for a number
+  and at `parse_number.h:32-36` for `inf` and `nan`) is set. A caller porting
+  from `strtod` has to pre-strip.
 * **A leading `-` is accepted**, including negative zero: `"-0"` is
   `0x80000000` at `f32` width, not `0x00000000`.
 * **`"inf"`, `"infinity"` and `"nan"` parse successfully**, case insensitively,
   with an optional `-` and with the C++17 `nan(n-char-seq-opt)` payload
-  (`include/fast_float/parse_number.h:37-56`). They are not errors. **This
+  (`include/fast_float/parse_number.h:37-67`). They are not errors. **This
   binding is therefore not a validator for untrusted text**; a caller that must
   reject non-finite input has to check the result itself, or use a different
   parser.
@@ -191,21 +239,47 @@ the following is upstream's behaviour, not this package's:
 * **Subnormals are produced, not flushed.** A value below the smallest normal
   but above zero rounds into the subnormal range.
 
-### Errors, and what each one means for your variables
+### Errors, and what each one leaves behind
 
 `Error` has exactly three members, and each is a claim about a comparison the
 code actually made:
 
-| Error | Bridge status | What happened | What you can read afterwards |
+| Error | Bridge status behind it | What happened | What the **typed** call leaves behind |
 |---|---|---|---|
-| `InvalidArgument` | `FF_STATUS_INVALID_ARGUMENT` (`1`) | no number matched: empty buffer, leading space or tab, leading `+`, a lone `.` or `-` | **nothing was written.** Your out-variables still hold what you put there |
-| `ResultOutOfRange` | `FF_STATUS_RESULT_OUT_OF_RANGE` (`2`) | a number did match and did round, but past the largest finite magnitude or below the smallest | the infinity or zero upstream rounded to, through `pub const c` — see below |
+| `InvalidArgument` | `FF_STATUS_INVALID_ARGUMENT` (`1`) from `parse32`/`parse64`; **no bridge status at all** from `parse32Exact`/`parse64Exact` | from `parse32`/`parse64`: no number matched — empty buffer, leading space or tab, leading `+`, a lone `.` or `-`. From `parse32Exact`/`parse64Exact`: a number **did** match, and it was not the whole buffer | **no result at all.** No `Parsed32`/`Parsed64` is constructed, so your own variables still hold exactly what you put there |
+| `ResultOutOfRange` | `FF_STATUS_RESULT_OUT_OF_RANGE` (`2`) | a number did match and did round, but past the largest finite magnitude or below the smallest | **no result at all.** The infinity or zero upstream rounded to, and the byte count it took, existed only in the bridge's out-parameters, which this call drops — read them through `pub const c`, see below |
 | `StatusNotRecognised` | none | the bridge returned a value that is not one of the three codes its own header pins | unreachable by construction; an error rather than a panic so a future bridge change is reported instead of aborting |
+
+**The status column describes one entry point at a time; it is not a mapping on
+the tag.** `parse32` and `parse64` translate the bridge's status and nothing
+else. The exact pair adds a check of its own *after* a successful parse:
+`parse32Exact` is `try parse32(bytes)` followed by
+`if (parsed.consumed != bytes.len) return error.InvalidArgument`
+(`zig/root.zig:478-482`), and `parse64Exact` is the same two lines at `:486-490`.
+The bridge behind that rejection returned `FF_STATUS_OK`, and it says so in its
+own source rather than only in the facade's arithmetic: `zig/bridge.cpp:62-66`
+writes both out-parameters whenever `result.ec != std::errc::invalid_argument`
+and then returns `classify(result.ec)`. For `"1.5x"` the parse therefore
+succeeded, both out-parameters were written, and `classify` returned
+`FF_STATUS_OK` — it is the *facade* that refuses the trailing tail. So
+`parse32Exact("1.5x")` is `error.InvalidArgument` with no
+`FF_STATUS_INVALID_ARGUMENT` anywhere behind it, and a caller cross-checking a
+tag against `c.FF_STATUS_INVALID_ARGUMENT` has to establish which entry point
+produced the tag first. The three constants answer "what did the bridge report";
+`Error` answers "what did this facade refuse", and those are the same question
+only for `parse32` and `parse64`. `Error` is not a second spelling of `ff_status`
+and no `pub const` here converts one to the other.
 
 **The typed surface withholds the value on `ResultOutOfRange` on purpose.** It
 returns an error rather than a second successful result carrying an infinity or a
 zero the caller did not write, and `Parsed32`/`Parsed64` are never constructed on
-that path. The value is not lost — it is where the C ABI puts it.
+that path. The value is not lost — it is where the C ABI puts it, and the tag
+carries none of it back, so a caller that wants the residue has to make the raw
+call again rather than recover it from `error.ResultOutOfRange`.
+
+That is the one asymmetry between the two routes, and it runs in this direction
+only: a typed failure writes nothing anywhere, while a raw failure can write
+both of its out-parameters.
 
 ### The C ABI, and the out-of-range value contract
 
@@ -251,6 +325,14 @@ object; upstream compares them before dereferencing either
 do not exist. In Zig, `lastOf` returns `first` unchanged for a zero-length slice
 rather than computing `ptr + 0`, for the same reason.
 
+**The pointer obligations, once you call the bridge yourself.** `first` and
+`last` must both point into one allocation the caller still owns, and `last`
+may equal `first`. `out_value` and `out_consumed` must both be non-null and
+writable: the bridge dereferences both without a null check, and there is no
+way to drop either one. `parse32`/`parse64` hand the range to the bridge
+themselves through this facade's `firstOf` and `lastOf`; a direct
+`c.ff_parse_f64(...)` call makes all four of these the caller's to satisfy.
+
 **Bounds.** Every public bound here is an ordinary comparison that survives an
 optimized build: `parse*Exact` compares `consumed` against `bytes.len` with `!=`
 and returns an error, not a debug assertion. No `std.debug.assert` guards
@@ -280,10 +362,11 @@ declared; the receipt is in "Verification status".
 
 ## Build modes
 
-* **Bundled (the only mode).** Compiles upstream's nine real headers through
-  `zig/bridge.cpp` into `libfast_float.a` for whatever target is being built, and
-  installs the upstream header tree next to it. Nothing is downloaded, no
-  upstream build system runs, and `build.zig.zon` declares no dependencies.
+* **Bundled (the only source mode).** Compiles upstream's nine real headers
+  through `zig/bridge.cpp` into the C ABI archive for the selected linkage,
+  whichever target is being built, and installs the upstream header tree next
+  to it. Nothing is downloaded, no upstream build system runs, and
+  `build.zig.zon` declares no dependencies.
   `-std=c++17` is pinned, not preferred: upstream asks for C++11
   (`FASTFLOAT_CXX_STANDARD` / `cxx_std_11`) and C++17 is a strict superset that
   is still below the two thresholds that would switch upstream's own code paths —
@@ -291,14 +374,191 @@ declared; the receipt is in "Verification status".
   and `constexpr_feature_detect.h:17` turns on `FASTFLOAT_HAS_BIT_CAST` only for
   `__cpp_lib_bit_cast >= 201806L`, a C++20 library feature. Leaving the standard
   to the compiler default would make the build depend on which clang Zig ships.
+* **Static or shared is a delivery choice, not a source mode.** `-Dlinkage`
+  selects it and defaults to `.static`, which is what this package produced
+  before the option existed. Both deliveries compile the same one translation
+  unit with the same flags and the same `-std=c++17`; only the link and the
+  export surface differ, and the export closure is exactly `ff_parse_f32` and
+  `ff_parse_f64`. A target that cannot carry a shared object is **refused**,
+  never substituted: `build_support/graph.zig:sharedObjectRefusal` returns the
+  reason once, the build fails naming the target, and inside `check` that one
+  matrix cell becomes a failing step carrying it while the other five are still
+  compiled. See `README.md`, "Platform boundaries".
+* **Dispatch is a separate option.** `-Druntime` (default off) resolves the
+  bridge's entry points at run time instead of linking them; see "Runtime
+  loading" below. It is orthogonal to `-Dlinkage`, which keeps deciding what is
+  built and installed. A linked build is unchanged in every respect.
+
 * **System mode: not applicable.** There is no `b.systemIntegrationOption` and no
-  system branch. A header-only library installs no binary, so a "system"
-  fast_float is a directory of headers: no installed ABI to bind to, no
+  system branch. Upstream installs no binary, so a "system" fast_float on a
+  machine is a directory of headers: no installed ABI to bind to, no
   versioned symbol set to match, nothing for a system mode to select. The rule
   that applies to this fork is **vacuous rather than satisfied**, and it is
   recorded that way in `UPSTREAM.md` rather than being presented as a passed
-  mode. A header-only library has no honest system mode; this one does not
-  pretend to have one.
+  mode. The archive this fork installs is a different thing: it is built here,
+  not found elsewhere.
+
+## Runtime loading
+
+`-Druntime` (default off) builds the same facade over a dispatch: each selected
+native function becomes a call through one process-lifetime table that an
+explicit `load(source)` fills, instead of a link-line reference. The facade keeps
+the same translated header and the same public types, and `-Dlinkage` keeps
+deciding what is built and installed — under `-Druntime` that artifact is what a
+provider *is*, not something the module links.
+
+```zig
+const fast_float = @import("fast_float");
+
+try fast_float.load(.{ .path = "/path/to/libfast_float.so.0" });
+const tenth: f64 = try fast_float.parse64Exact("0.1");
+```
+
+The source is explicit: an absolute `.path`, or a `.system` basename handed to
+the platform loader. There is no default provider, no search path and no
+fallback to a linked copy, and no path-to-system fallback either — a build that
+was not told which file to load says so rather than loading something else.
+
+**The provider contract in this repository.** `smoke.zig` reads
+`--provider <path>` or `FASTFLOAT_PROVIDER`; `tests.zig` reads
+`FASTFLOAT_PROVIDER` from the environment and stops by name if it is unset; and
+`consumer/src/main.zig` reads the same `--provider`, with the consumer package
+forwarding both `-Druntime` and its run arguments. Arguments reach the smoke
+program through `zig build smoke -Druntime=true -- --provider <path>`, and the
+consumer runs as
+`cd consumer && zig build run -Druntime=true -- --provider <path>`. Nothing is
+loaded by default and no other file is tried.
+
+**What the dispatch does not change.** `pub const c` is still the complete
+translated `zig/bridge.h`, `Error` still has the same three members, and the
+out-parameter contract in "The C ABI" above is unchanged — the values come from
+whichever provider the table was filled from.
+
+The whole runtime route is in this tree, and `runtime/` is in `build.zig.zon`
+`.paths`, so a dependent receives all of it. `runtime/graph.zig` wires it:
+`runtime/loader.zig` is the reusable core, imported at
+`runtime/graph.zig:131-144` so a linked build's `LoadSource` and `LoadError` are
+the same types a runtime build dispatches through; `runtime/library.zig` is
+this SDK's descriptor; `runtime/generate.zig` is the host program
+`runtime/graph.zig:235-244` builds and runs over the translation step's real
+output; and `runtime/sync.c` with `runtime/sync.h` is the synchronization
+binding compiled with `-DRT_SYNC_PREFIX=fast_float_rt`
+(`runtime/graph.zig:215-219`). `build_support/graph.zig:110` is the one seam
+between them.
+
+The gate has run for the native host. Eight `-Druntime` configurations — both
+linkages in all four optimize modes — compiled, tested, smoked and installed
+with exit 0 on 2026-10-04, each naming a provider explicitly and answering the
+whole known-answer corpus through the table; the rows in "Verification status"
+carry the counts. What those runs do not reach is named there as well: the
+provider was this tree's own shared object named by absolute path, and no
+basename-named provider, no provider this tree did not build, and no failure,
+retry, idempotence or provider-change path has been exercised here.
+
+## Nix packaging and the development environment
+
+`package.nix` is one source-only derivation; `flake.nix` and `devenv.nix` both
+consume it, so the two cannot drift. It builds this repository's own tree with
+`zig build install` and adds no C or C++ flag of its own: `-std=c++17`, the
+upstream include path and the bridge translation unit stay where
+`build_support/graph.zig` puts them. Both packages are linked builds:
+`-Dlinkage` selects the delivery and `-Druntime` is left at its default off, so
+neither Nix package depends on a provider being loadable at build time.
+
+`flake.lock` is committed in this repository, pins exactly the
+`github:NixOS/nixpkgs/c7def046b9a883d46974757852106483d741586f` `flake.nix`
+declares together with that revision's `narHash`, and is listed in
+`build.zig.zon` `.paths`, so it travels with the package: a dependent who
+fetched it resolves this nixpkgs rather than the one its machine happens to
+carry. `devenv.lock` is not in this tree and is not named; `devenv.yaml` states
+what it must pin when it is created.
+
+```
+nix build .#static     # this SDK's existing linkage policy, and the flake default
+nix build .#shared     # the same SDK delivered as a shared archive
+nix develop            # toolchain only; parity, not the canonical route
+```
+
+Each output installs the archive, `fast_float_bridge.h`, the whole upstream
+header tree, `lib/pkgconfig/fast_float.pc`, and the full licence set under
+`share/licenses/fast_float/`: upstream's three texts, `NOTICE.md`,
+`FORK-LICENSE.md`, `UPSTREAM.md`, `README.upstream.md`, and the corpus's own
+Apache-2.0 copy under the distinct name `testdata-supplemental-LICENSE`. All of
+that is installed by `zig build install` itself, from one generator, so the Zig
+install and both Nix packages carry the same set; the derivation adds nothing
+beside it. The 262 MB known-answer corpus is **not** installed — it is test
+input, not installed data — and stays in the derivation's source, where
+`zig build test` reaches it.
+
+The two packages are one SDK with one delivery option, not two SDK modules. The
+export closure of the shared object is exactly `ff_parse_f32` and `ff_parse_f64`
+— a generated version script with `local: *` on ELF, a generated module
+definition on windows-gnu, which a COFF DLL needs because it exports nothing
+without one, and nothing on Darwin, which this build states rather than papers
+over. Upstream installs no library at all — its CMake target is `INTERFACE` — so
+the shared object's ABI is this fork's own C ABI, not an upstream release, and
+its `0.1.0` version is bumped only when `zig/bridge.h` changes incompatibly.
+
+`wasm32-wasi` has no dynamic linker, so `-Dlinkage=dynamic` is refused for it:
+nothing is compiled, nothing is substituted, and the failure names the target.
+The default is untouched — no `-Dlinkage` means `static`, which is exactly what
+`wasm32-wasi` takes, so `zig build check` with no flag still compiles all six
+cells.
+
+`devenv` is the canonical development environment. `devenv shell`, or `.envrc`
+where direnv is installed, enters it. The shell carries tools and tasks; its
+`outputs.static` and `outputs.shared` are lazy, so entering it builds nothing and
+`devenv build outputs.static` is the packaging route:
+
+```
+devenv shell sdk:install            # zig build install, into a prefix outside this tree
+devenv shell sdk:test               # zig build test, optionally -Dtarget=...
+devenv shell sdk:smoke
+devenv shell sdk:check
+devenv shell provenance:integrity   # sha256sum -c UPSTREAM.sha256
+devenv shell sdk:consumer
+devenv build outputs.static
+devenv build outputs.shared
+```
+
+Every task that reads this repository's files changes into this repository's own
+directory first, from a path `devenv.nix` evaluates. `devenv --from path:<this
+repository>` gives the generated wrapper the *project* directory as its current
+directory, and `DEVENV_ROOT` names that project, which holds none of this SDK's
+inputs; `package:static` and `package:shared` read no file here and are
+unchanged. `sdk:install` writes outside the working copy, defaulting to
+`$ZIG_LOCAL_CACHE_DIR/fast_float-install`, falling back to
+`$TMPDIR/zig-local-cache/fast_float-install`, taking `PREFIX=...` over both, and
+refusing with a message when neither variable is set. `"$@"` reaches
+`zig build` unchanged in every task.
+
+Each of those five `zig build` commands carries `-j8`, `--summary all` and
+`--cache-dir "$ZIG_LOCAL_CACHE_DIR"` after its own step flags and before
+`"$@"`, so a caller's own `-jN`, `--summary` or `--cache-dir` still wins — the
+build runner reads the last occurrence of each and every one overwrites the one
+before it (`lib/compiler/build_runner.zig:422-427`, pinned 0.16.0). The steps,
+the single `--prefix` and the `"$@"` forwarding are otherwise unchanged.
+
+That prefix is needed by `sdk:install` alone, and the step graph says why rather
+than convention: the install step depends on the smoke executable, not the
+reverse (`build.zig:204`), while `smoke` (`:212`), `test` (`:245`) and `check`
+(`:247-257`) and the consumer's `run` (`consumer/build.zig`) each depend only on
+their own compile or run step. None of them reaches an install step, writes a
+delivery output, or is given a `--prefix` it does not need.
+
+Cache and scratch locations are the caller's to supply. Every task body resolves
+both Zig cache directories before its own compiler starts, because
+`devenv tasks run --mode single <name>` runs a body without the `enterShell`
+hook. An exported variable is kept; a missing one is filled from
+`XDG_CACHE_HOME` and then from `$TMPDIR` under this SDK's existing names —
+`zig-global` and `zig-local`, `zig-global-cache` and `zig-local-cache` — and a
+caller who named neither gets the variables to export and a stop, not a
+`.zig-cache` in this tree. `enterShell` still applies the same
+`XDG_CACHE_HOME` default to an interactive session, and it never unsets one. No
+Nix file in this repository names a host account, a node, a store path or a
+scratch mount.
+
+Nothing in this section has been run. It is `PENDING-VERIFICATION`.
 
 ## Verification status
 
@@ -316,22 +576,34 @@ are not `observed` say so and claim nothing.
 | installed C surface | **observed, exit 0** — the installed header compiled as C11, linked against the installed archive and ran, including both round-half-to-even ties, the invalid-argument path that writes nothing and the overflow path that writes both out-parameters | `…-fast_float-installed-C-surface-181.log` |
 | installed C++ surface | **observed, exit 0** — a real `ff_parse_f64("9007199254740995", …)` call returning `consumed == 16` and `2^53 + 4`, alongside a direct `fast_float::from_chars` call and its `std::errc::invalid_argument` path | `…-fast_float-installed-upstream-Cpp-surface-corrected-extraction-196.log` |
 | `check`, six cross targets | **observed, exit 0 for all six**, 7/7 steps each, one command per target, in two rounds. The first: `…-matrix-x86_64-linux-gnu-133.log`, `-aarch64-linux-gnu-137`, `-aarch64-macos-none-140`, `-x86_64-windows-gnu-143`, `-riscv64-linux-gnu-146`, `-wasm32-wasi-149`. The second, against this tree on 2026-10-02 with `zig build check -Dtarget=<triple> -Doptimize=Debug -j8 --summary all --color off`, 2.9 s to 5.2 s each: `local://foundation-cross-test-baseline-fast_float-x86_64-linux-gnu.log`, `-aarch64-linux-gnu.log`, `-aarch64-macos-none.log`, `-x86_64-windows-gnu.log`, `-riscv64-linux-gnu.log`, `-wasm32-wasi.log` | those six, and the six baseline logs |
-| `sha256sum -c UPSTREAM.sha256` | **observed, exit 0** — 73 records, no failures | `…-fast_float-immutable-source-integrity-124.log` |
+| `sha256sum -c UPSTREAM.sha256` | **observed, exit 0** — 73 records, no failures, on the tree as it stood on 2026-10-02 | `…-fast_float-immutable-source-integrity-124.log` |
 | `git diff --exit-code b0ab987b… -- include LICENSE-APACHE LICENSE-BOOST LICENSE-MIT` | **observed, exit 0 — empty output.** Upstream's nine library headers and its three licence texts in this working tree are byte-identical to the pinned commit `b0ab987b3dfdde13fa1915f65ef2a5c068d9208c`. Run directly by the driver, not through CI; it covers these four path groups and not the job's wider list | `…-fast_float-pinned-native-pristine-diff-269.log` |
 | `zig fetch` (materialised package) | **observed, exit 0, historical.** printing `fast_float-8.3.0-IdJv95QQZhDN1SQSHpQFuzW1cE-hqYLTHqBmiM9QW4yG`. Run by the driver from a separate scratch build root outside this repository, not from the package source root, with `--global-cache-dir` pointing at the driver's own package cache. What it copies is the manifest-filtered package. It describes the tree **before** this wave's run-step and profile edits, so it is history and not a claim about what ships today | `…-fast_float-external-driver-package-fetch-326.log` |
 | `sha256sum -c UPSTREAM.sha256` **inside the materialised package** | **observed, exit 0 — all 73 records `OK`, historical.** Every path the record names is present in the filtered copy a dependent receives, which is the `.paths` closure claim and not something a check run in this checkout can show. Same round as the row above, hence the same caveat | `…-fast_float-materialized-package-integrity-335.log` |
 | consumer, materialised package | **observed, exit 0, historical** — run from inside the fetched copy rather than from this tree, so `consumer/`'s relative `.path` resolved against a package this repository's build graph never produced: all eight constants matched, the unit line reported 7 bytes consumed and suffix `" m/s^2"`, and the exact-parse and leading-`+` refusals behaved as written. Same round as above | `…-fast_float-materialized-package-consumer-342.log` |
 | `zig fetch` from the package source root | **superseded.** exit 1, `error: unable to copy directory '/vol/fob-vol7/mi19/gertullj/foundation-libs/fast_float': IllegalFileTypeInPackage`. The passing row above is the same absolute package path fetched from an external scratch build root; no byte of this tree changed between the two, and no cause is asserted here for the difference | `…-fast_float-materialized-package-fetch-262.log` |
 | materialised package, final round against this tree | **Driver-owned closure proof.** Filtered fetch, source/fetched integrity and fetched consumer run after SDK documents settle. Current result and identity are in the workspace ledger's `cross_test_wave.materialized_packages.fast_float`; the historical rows above predate the run-step/profile changes. Identities stay outside package-local documents | `local://foundation-cross-test-package-regression.json` |
-| `verify.yml` `provenance` job | **The whole job has never been executed in this workspace.** The hand-run diff does not prove the commit-in-history check, fork-record presence, licence-filename greps in `NOTICE.md` and upstream `README.md`, or the wider pristine path set (`tests benchmarks cmake ci docs script fuzz`, `CMakeLists.txt`, `BUILD.bazel`, `MODULE.bazel`, `.bazelrc`, `.clang-format`, `clang-format-ignore.txt`, `AUTHORS`, `CONTRIBUTORS`, `README.md`, `SECURITY.md`). No current workflow step greps `testdata/README.md` | — |
+| `verify.yml` `provenance` job | **The whole job has never been executed in this workspace.** The hand-run diff does not prove the commit-in-history check, fork-record presence, licence-filename greps in `NOTICE.md` and upstream's preserved `README.upstream.md`, or the wider pristine path set (`tests benchmarks cmake ci docs script fuzz`, `CMakeLists.txt`, `BUILD.bazel`, `MODULE.bazel`, `.bazelrc`, `.clang-format`, `clang-format-ignore.txt`, `AUTHORS`, `CONTRIBUTORS`, `README.upstream.md`, `SECURITY.md`). The job now diffs `README.upstream.md` rather than `README.md`, because `README.md` is this fork's own. No current workflow step greps `testdata/README.md` | — |
 | `cross-test`, 53-platform matrix, before this correction | **observed failure, exit 1.** `cross-test --no-profile --targets x86_64-linux --jobs 1 --build-jobs 4 --build-timeout 900` reported `build=pass`, `run=fail`, `reason=no_test_results` — it compiled the test binary for that target and ran none of the 13 tests, because `Query.isNative()` is false for every query that names a target and `-Dtarget` always names one. This is the run that put the run step on every target; it is kept because it is why the correction was made | before: `/home/tmp2/gertullj/scratch/foundation-libs/cross-test-01a0f400/before/fast_float/cross-test-summary.json` |
 | `cross-test`, 53-platform matrix, first full sweep | **observed, exit 1 — 17 pass, 33 build-only, 3 fail.** All 53 targets compiled. On `x86_64-linux` (5m98.837ms), `aarch64-linux` (5m18.377s) and `aarch64_be-linux` (5m1.042s) the test `every selected corpus file matches its recorded bit patterns at both widths` hit the harness's 300-second per-test deadline, 12/13 passed and one timed out on each; the other 17 cells ran the whole suite, 13/13. Kept rather than erased, because it is what the deadline change answers | `local://foundation-cross-test-matrix-fast_float-x86_64-linux.log`, `-aarch64-linux.log`, `-aarch64_be-linux.log` |
 | `cross-test`, 53-platform matrix, corrected deadlines | **observed, exit 0 — 20 pass, 33 build-only, 0 fail.** `cross-test --jobs 2 --build-jobs 4 --build-timeout 3600` under this package's profile (`CROSS_TIMEOUT=1800`), run `20261002-060543-20930-1891`, Zig 0.16.0, `zig-build` mode, 2026-10-02. Each of the 20 cells with an executor reported 13/13 and printed all nine per-file line counts — all 1,382,483 rows at both widths, `x86_64-linux` in 2 s natively and `aarch64-linux` in 32 s under `/bin/qemu-aarch64`. The 33 remaining cells are `runtime_unavailable`: compiled, never executed, never counted as a pass | `local://foundation-cross-test-corrected-fast_float.json` and the per-target logs beside it |
+| `cross-test`, 53-platform matrix, source-bound cohort on the current tree | **observed, exit 0 — `status: partial`, raw `pass=20 fail=0 build_only=33 partial=0`.** Receipt `20261004T221720228710Z-45046/fast_float-53-target-8.json`, 2026-10-04, `source_stamp_before == source_stamp_after` (`bc692cd7…`), `zig_version 0.16.0`, `mode zig-build`, `target_count 53`, `target_jobs 8`, `jobs_per_build 8`, `bookkeeping_failure false`. Every executed cell reports `tests=13`; `x86_64-linux` ran natively and `aarch64-linux` under `/bin/qemu-aarch64`, as in the 2026-10-02 sweep above. **Thirty-three `build_only` cells compiled and ran nothing** and are not passes. This row is the current one; the 2026-10-02 sweep is kept beside it because it is what the deadline profile was measured against, and its counts happen to agree | `20261004T221720228710Z-45046/fast_float-53-target-8.json` |
+| `check` over the six required targets, compile-only, current tree | **observed, exit 0 — `Build Summary: 32/32 steps succeeded`.** Row `baseline-fast_float-check` of `baselines-and-configs/20261005T014547Z-797a73f2`, 2026-10-05: `declared_target_count 6`, all six triples named in the run's own step lines, `test_pass_lines: []`, `failing_step_lines 0`. The 2026-10-02 row above walked the same six one command at a time at 7/7 steps each; both are compile evidence and neither runs anything | `baselines-and-configs/20261005T014547Z-797a73f2` |
 | system mode | not applicable, vacuously; see "Build modes" | — |
+| linked native `test smoke install -Druntime=false`, both linkages, four optimize modes | **observed on this tree, exit 0 for all eight** — `13/13 tests passed` in each, `Build Summary: 22/22 steps succeeded` in the four static cells and `23/23` in the four dynamic ones, with all nine per-file corpus line counts printed in every cell, so all 1,382,483 rows were consumed at both widths in all eight. Each dynamic cell's configure line names `shared object, soname libfast_float.so.0 exporting only the two bridge entry points`, and `install` wrote into a prefix outside this repository in every cell | `local://foundation-current-native-index.json`, rows `fast_float-current-native-{dynamic,static}-{Debug,ReleaseSafe,ReleaseFast,ReleaseSmall}` |
+| runtime loading under `-Druntime` on the native host, both linkages, four optimize modes | **observed on this tree, exit 0 for all eight** — `13/13 tests passed` in each, `23/23` steps for the four static cells and `24/24` for the four dynamic ones. Every configure line states `runtime-loaded dispatch (-Druntime=true); no library is linked into the module`, `smoke` reports `runtime-loaded build` and prints the provider it resolved, and `tests.zig` — which stops by name when `FASTFLOAT_PROVIDER` is unset — read all nine corpus files at both widths in every cell, so the suite answered through the dispatch rather than beside it. The four static cells also print that an archive is a file a loader cannot open, so a provider has to be a shared object. **Still `PENDING-VERIFICATION`**: a provider named by basename, a provider this tree did not build, the pre-initialization call, failure and refusal, explicit retry, idempotence, provider change, and the allocator check at load time | the same index, rows `fast_float-current-loaded-{dynamic,static}-{Debug,ReleaseSafe,ReleaseFast,ReleaseSmall}` |
+| the provider those eight loaded runs used | **This tree's own shared object, named by absolute path** — the `libfast_float.so` the four dynamic runs installed into their prefix. No external provider and no basename-named provider has been loaded here, and no row above should be read as covering either | the same sixteen per-gate files, each recording its own `FASTFLOAT_PROVIDER` |
+| the shared object's export table, and the Darwin and windows-gnu deliveries | **PENDING-VERIFICATION.** The soname and the export closure are the build graph's own printed statement; nothing in these receipts reads an installed object with `nm`, `objdump` or `dumpbin`, and no Darwin or windows-gnu delivery has been installed on this host | — |
+| the installed closure on this tree: archive or shared object, `fast_float_bridge.h`, the upstream header tree, `lib/pkgconfig/fast_float.pc`, `share/licenses/fast_float/` | **Partly observed.** Every one of the sixteen runs above ran `install` into a prefix outside this repository and no install step failed, and each install step list names the generated pkg-config file and all eight licence records — the closure `FORK-NOTES.md` 22 recorded as silently absent from the install is present on this tree. What stays `PENDING-VERIFICATION` is the assertion half: `package.nix` re-checks that closure and fails the derivation when anything promised is missing, and no `nix` command has been run here | the same sixteen rows |
+| `sha256sum -c UPSTREAM.sha256` against this tree | **PENDING-VERIFICATION.** The two integrity rows above are 2026-10-02 evidence for an earlier tree; no replay over this tree's current bytes is recorded | — |
+| static and shared Nix derivations, `devenv` shell, fetched filtered package | **PENDING-VERIFICATION, nothing run.** Both Nix packages consume `-Dlinkage`, which now exists; neither has been built. See `README.md` §3b for the whole pending table | — |
 
 Every `…-…` prefix above is `local://foundation-expansion-fast_float`; the
-fully written `local://foundation-cross-test-…` names are this wave's receipts
-and are spelled out rather than prefixed.
+fully written `local://foundation-cross-test-…` and
+`local://foundation-current-native-index.json` names are this wave's receipts and
+are spelled out rather than prefixed. The current index carries one file per
+gate; its sixteen `fast_float-current-*` rows are the runs reported above as
+observed on this tree, and the 2026-10-02 rows are earlier rounds.
 
 **The materialised package, and what those rows prove.** The next three
 paragraphs describe the earlier round, against the tree as it stood before this
@@ -444,9 +716,10 @@ the Apache-2.0 text this fork sourced from the producer) — and nothing else, s
 the same command works in a clone and in an unpacked package. Digests were
 produced by reading each file as raw bytes with Bun and hashing with
 `node:crypto`; no shell hashing command and no git command was used. **The
-check has been run and passed: 73 records, no failures.** See
-[`UPSTREAM.md`](UPSTREAM.md) for the exact scope, the stated exclusions and what
-the record does and does not prove.
+check has been run and passed: 73 records, no failures** — on the tree as it
+stood on 2026-10-02; a replay over this tree's current bytes is
+`PENDING-VERIFICATION`. See [`UPSTREAM.md`](UPSTREAM.md) for the exact scope, the
+stated exclusions and what the record does and does not prove.
 
 `UPSTREAM.sha256` is listed in `build.zig.zon` `.paths`, so the check travels
 with the package rather than living only in this repository — and that half is
@@ -458,8 +731,8 @@ record names is present in the filtered copy a dependent receives. See
 
 ## Licence
 
-Upstream is `Apache-2.0 OR BSL-1.0 OR MIT`; all three texts ship verbatim as
-`LICENSE-APACHE`, `LICENSE-BOOST` and `LICENSE-MIT`, and `NOTICE.md` records all
+Upstream is `Apache-2.0 OR MIT OR BSL-1.0`; all three texts ship verbatim as
+`LICENSE-APACHE`, `LICENSE-MIT` and `LICENSE-BOOST`, and `NOTICE.md` records all
 three by name so no downstream can be left with only one. Upstream's library
 includes code adapted from Google Wuffs (written by Nigel Tao) under Apache-2.0,
 and that obligation is discharged by the whole `LICENSE-APACHE` text.
@@ -469,15 +742,27 @@ grant, credited to Nigel Tao in the corpus's own vendored README; the Boost and
 MIT alternatives are not offered for it. Its licence text sits at
 `testdata/supplemental/LICENSE` and is byte-distinct from `LICENSE-APACHE`, and
 `testdata/README.md` records which of the sixteen vendored files came from the
-donor and which this fork sourced.
+donor and which this fork sourced. `NOTICE.md` lists all sixteen one by one,
+including the four the tests deliberately do not read, because a file this fork
+redistributes is under the grant whether or not it is read.
 
 **This fork's own files — the Zig build, the facade, the C ABI bridge, the
-tests, the example, the consumer package and the documentation — carry no
-stated licence.** An earlier revision of this README offered them under
-Apache-2.0 because that text already ships here; that was a grant nobody
-authorised this fork to make, so it is withdrawn and recorded as unassigned in
-[`NOTICE.md`](NOTICE.md) rather than left standing. Attribution, the files this
-fork adds or edits, the Apache-2.0 obligations the two carried works impose on
-whoever redistributes them, and the patent-grant termination clause are all in
-that file. Upstream's `README.md` also carries the triple licence grant and the
-Wuffs credit, and travels with the package.
+tests, the example, the consumer package, the Nix and devenv packaging and the
+documentation — are licensed `Apache-2.0 OR MIT OR BSL-1.0`**, on the owner's
+explicit authorization for this wave. That is the same three-way alternative
+upstream offers rather than a new selection, and it adds no requirement for a
+downstream to choose between alternatives it already had. An earlier revision of
+this README offered these files under Apache-2.0 alone because the text already
+shipped here; that was a grant nobody authorized, it was withdrawn and recorded
+as unassigned, and it is now superseded by an actual grant.
+[`FORK-LICENSE.md`](FORK-LICENSE.md) states the SPDX identifier, the
+authorization, the per-file scope and — just as important — the material the
+grant does **not** cover. Copyright in those files is held by the downstream that
+owns this repository; no individual is named and none is asserted, and no
+upstream author is credited with them.
+
+Attribution, every file this fork adds or edits, the Apache-2.0 obligations the
+two carried works impose on whoever redistributes them, and the patent-grant
+termination clause are all in [`NOTICE.md`](NOTICE.md). Upstream's preserved
+[`README.upstream.md`](README.upstream.md) carries the triple licence grant and
+the Wuffs credit, and travels with the package.

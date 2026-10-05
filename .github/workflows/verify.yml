@@ -10,17 +10,23 @@
 #               pinned upstream commit still in this history, and is every
 #               upstream source, test, tool, documentation and licence file
 #               byte-identical to that commit
-#   native      does it build, do the behavioural tests pass in Debug and in
-#               ReleaseSafe, and does the smoke example execute and check its
-#               own answers on this host
+#   native      does it build in both linkages, do the behavioural tests pass
+#               in Debug and in ReleaseSafe, does the smoke example execute and
+#               check its own answers on this host, does the same hold for the
+#               shared delivery, and is a shared delivery *refused* for the one
+#               matrix target whose platform cannot carry one
 #   c-surface   does the *installed* C ABI artifact and the *installed* headers
 #               compile, link and run from outside the build graph -- once from
-#               C, once from C++
+#               C, once from C++, in each linkage -- and is the installed
+#               pkg-config record and licence material a C consumer's prefix
+#               actually needs
 #   cross       does the C++ bridge, the translated header, the facade, the
 #               tests and the example compile for each of the six required
-#               targets, with no target skipped and none pre-judged
+#               targets, in each linkage, with no target skipped and none
+#               pre-judged -- where a target cannot take a linkage, the refusal
+#               is the checked result rather than a substituted artifact
 #   consumer    does the published module resolve from a package that did not
-#               write it
+#               write it, in each linkage
 #
 # Every job installs Zig 0.16.0 through setup-zig. The bare `zig` on a runner's
 # PATH is not used as a version-bearing shim.
@@ -63,7 +69,7 @@ jobs:
       - name: Fork records are present and non-empty
         run: |
           set -eu
-          for f in NOTICE.md UPSTREAM.md CHANGELOG.md FORK-NOTES.md README.zig.md; do
+          for f in NOTICE.md FORK-LICENSE.md UPSTREAM.md CHANGELOG.md FORK-NOTES.md README.md README.zig.md README.upstream.md; do
             test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }
           done
 
@@ -93,18 +99,28 @@ jobs:
           done
           # The grant itself lives in upstream's README, because upstream puts
           # no per-file notice in its headers. It has to survive there too.
-          grep -q 'LICENSE-APACHE' README.md
-          grep -q 'LICENSE-BOOST' README.md
-          grep -q 'LICENSE-MIT' README.md
+          # That file is README.upstream.md here: README.md is this fork's own
+          # README and carries none of upstream's licence wording.
+          grep -q 'LICENSE-APACHE' README.upstream.md
+          grep -q 'LICENSE-BOOST' README.upstream.md
+          grep -q 'LICENSE-MIT' README.upstream.md
+
+          # The fork's own grant is recorded, and it is a real one rather than
+          # an inference from whatever text happens to ship.
+          grep -q 'Apache-2.0 OR MIT OR BSL-1.0' FORK-LICENSE.md
 
       - name: Independent fixture integrity
         run: sha256sum -c UPSTREAM.sha256
 
-      # No upstream file may be edited. .gitignore is the one upstream path this
-      # fork appends to, and .github/ is where this workflow lives; both are
-      # excluded on purpose and the append is recorded in UPSTREAM.md instead
-      # of being diffed, because comparing this fork's own bookkeeping with
-      # itself would catch a reworded comment rather than a lost upstream file.
+      # No upstream file may be edited. Three paths are excluded on purpose and
+      # for three different reasons, each recorded in UPSTREAM.md rather than
+      # diffed, because comparing this fork's own bookkeeping with itself would
+      # catch a reworded comment rather than a lost upstream file:
+      #   .gitignore  -- the one upstream path this fork appends to.
+      #   .github/    -- where this workflow lives.
+      #   README.md   -- this is the fork's own README. Upstream's bytes are
+      #                  preserved at README.upstream.md and it is that path the
+      #                  diff below checks.
       - name: Upstream sources are unmodified
         run: |
           set -eu
@@ -112,7 +128,7 @@ jobs:
             include tests benchmarks cmake ci docs script fuzz \
             CMakeLists.txt BUILD.bazel MODULE.bazel .bazelrc \
             .clang-format clang-format-ignore.txt \
-            AUTHORS CONTRIBUTORS README.md SECURITY.md \
+            AUTHORS CONTRIBUTORS README.upstream.md SECURITY.md \
             LICENSE-APACHE LICENSE-BOOST LICENSE-MIT)
           if [ -n "$changed" ]; then
             echo "upstream files were modified:" >&2
@@ -158,9 +174,59 @@ jobs:
       - name: Check (whole matrix in one graph)
         run: zig build check --summary all
 
+      # The same graph delivered as a shared object. Nothing about the compiled
+      # C++ changes between the two linkages, so the point of these three steps
+      # is not the parser: it is that a real `libfast_float.so` links, exports,
+      # is found by the loader at run time (Zig puts its own output directory on
+      # the dependent's rpath, so the test binary runs with no
+      # `LD_LIBRARY_PATH`) and answers the same tests the archive does.
+      - name: Build (shared delivery)
+        run: zig build --summary all -Dlinkage=dynamic
+
+      - name: Test (shared delivery, Debug)
+        run: zig build test -Dlinkage=dynamic --summary all
+
+      - name: Smoke (shared delivery)
+        run: zig build smoke -Dlinkage=dynamic --summary all
+
+      # `-Dlinkage=dynamic` across the same six targets cannot succeed, and
+      # making that the observed result is the point of this step:
+      # `wasm32-wasi` has no dynamic linker, so a shared object there is a file
+      # nothing can load. This build refuses that combination rather than
+      # handing back an archive for it -- no substitution, no warning line, a
+      # failure that names the target and the reason. The five cells that can
+      # carry a shared object are compiled by the `cross` job below, one matrix
+      # entry each.
+      - name: a requested shared delivery is refused where the platform has none
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/dynamic-check.log"
+          if zig build check -Dlinkage=dynamic --summary all > "$log" 2>&1; then
+            echo "expected -Dlinkage=dynamic to be refused for wasm32-wasi" >&2
+            cat "$log" >&2
+            exit 1
+          fi
+          grep -q 'wasm32-wasi' "$log" || {
+            echo "the refusal did not name the target:" >&2
+            cat "$log" >&2
+            exit 1
+          }
+          grep -q 'dynamic linker' "$log" || {
+            echo "the refusal did not say why:" >&2
+            cat "$log" >&2
+            exit 1
+          }
+          echo "the request was refused for wasm32-wasi, with its reason"
+
   c-surface:
-    name: installed C ABI artifact and headers
+    name: installed C ABI artifact and headers (${{ matrix.linkage }})
     runs-on: ubuntu-latest
+    strategy:
+      # Both deliveries of the same bridge, independently. One target's failure
+      # must not hide the other.
+      fail-fast: false
+      matrix:
+        linkage: [static, dynamic]
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
@@ -169,12 +235,115 @@ jobs:
 
       # The Zig facade reads the translated header from inside the build graph,
       # not the installed copy, so only a program outside that graph can prove
-      # the install is complete. `zig build` is what produces it.
+      # the install is complete. `zig build` is what produces it, and it is the
+      # same command for both linkages: `-Dlinkage` selects the artifact and
+      # nothing else.
       - name: Build and install
-        run: zig build --summary all
+        run: zig build --summary all -Dlinkage=${{ matrix.linkage }}
 
-      # A real C consumer of the installed header and archive. A declaration
-      # whose type is wrong fails to compile; a declaration the archive does
+      # What a C consumer has to name, resolved once per job. The static
+      # consumer links the archive and supplies the C++ runtime the archive's
+      # own undefined references need -- the same requirement build.zig states
+      # with `link_libcpp` on the artifact, and the same one the installed
+      # `fast_float.pc` records as `Libs.private`. The shared consumer links the
+      # versioned file by path and gets an `-rpath`, because a shared object
+      # records its SONAME rather than its build path and the loader has to find
+      # that name.
+      - name: Resolve what this job links against
+        id: link
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.linkage }}" = "dynamic" ]; then
+            echo "lib=zig-out/lib/libfast_float.so.0.1.0" >> "$GITHUB_OUTPUT"
+            echo "linkflags=-Wl,-rpath,$PWD/zig-out/lib" >> "$GITHUB_OUTPUT"
+          else
+            echo "lib=zig-out/lib/libfast_float.a" >> "$GITHUB_OUTPUT"
+            echo "linkflags=-lc++" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The installed metadata is part of the delivery, not decoration: a
+      # prefix a C consumer cannot ask a question about is a source drop.
+      # `pkg-config --validate` parses the record, and the two `--cflags
+      # --libs` queries are what a dependent would actually run. The prefix is
+      # `${pcfiledir}/../..`, so the answer is correct for the tree it was
+      # installed into with no configured-in path in it.
+      - name: the installed pkg-config record describes this delivery
+        run: |
+          set -euo pipefail
+          command -v pkg-config > /dev/null || {
+            echo "::error::pkg-config is not on this runner; the installed record cannot be gated" >&2
+            exit 1
+          }
+          pc=zig-out/lib/pkgconfig/fast_float.pc
+          test -s "$pc" || { echo "missing: $pc" >&2; exit 1; }
+          export PKG_CONFIG_PATH="$PWD/$(dirname "$pc")"
+          pkg-config --validate fast_float
+          pkg-config --print-errors --cflags --libs fast_float
+          # The version is upstream's own, read out of float_common.h and
+          # CMakeLists.txt, and build.zig refuses to configure when
+          # build.zig.zon disagrees with it.
+          test "$(pkg-config --modversion fast_float)" = "8.3.0"
+          # The private dependency is the C++ runtime for the archive and
+          # nothing for the shared object, which carries its own.
+          if [ "${{ matrix.linkage }}" = "static" ]; then
+            pkg-config --static --libs fast_float | grep -q -- '-lc++'
+          else
+            if pkg-config --static --libs fast_float | grep -q -- '-lc++'; then
+              echo "the shared delivery links its C++ runtime into the image and must not ask a consumer for one" >&2
+              exit 1
+            fi
+          fi
+
+      # Every carried licence and provenance record, including the corpus's own
+      # copy of the Apache-2.0 text under the distinct name NOTICE.md gives it.
+      # A binary that ships without them is the failure this step is here for.
+      - name: the installed licence material is present
+        run: |
+          set -euo pipefail
+          for f in LICENSE-APACHE LICENSE-MIT LICENSE-BOOST NOTICE.md \
+                   FORK-LICENSE.md UPSTREAM.md README.upstream.md \
+                   testdata-supplemental-LICENSE; do
+            test -s "zig-out/share/licenses/fast_float/$f" || {
+              echo "missing: zig-out/share/licenses/fast_float/$f" >&2
+              exit 1
+            }
+          done
+
+      # Only the shared delivery has an export table to be wrong about. The
+      # generated version script (`build_support/graph.zig`) exports exactly
+      # the two bridge entry points and makes everything else local, which is
+      # what keeps the C++ runtime this artifact links in from being published
+      # into the global symbol namespace of every process that loads it.
+      - name: the shared object exports exactly the bridge ABI
+        if: matrix.linkage == 'dynamic'
+        run: |
+          set -euo pipefail
+          lib=zig-out/lib/libfast_float.so.0.1.0
+          test -L zig-out/lib/libfast_float.so.0 || { echo "missing the soname symlink" >&2; exit 1; }
+          test -L zig-out/lib/libfast_float.so || { echo "missing the linker symlink" >&2; exit 1; }
+          soname=$(readelf -d "$lib" | sed -n 's/.*SONAME.*\[\(.*\)\]/\1/p')
+          echo "SONAME: $soname"
+          test "$soname" = "libfast_float.so.0" || {
+            echo "the soname is not the one this package documents" >&2
+            exit 1
+          }
+          exported=$(nm -D --defined-only "$lib" | awk '{print $NF}')
+          printf '%s\n' "$exported" | grep -qx 'ff_parse_f32'
+          printf '%s\n' "$exported" | grep -qx 'ff_parse_f64'
+          if printf '%s\n' "$exported" | grep -q '^_Z'; then
+            echo "a mangled C++ symbol is exported; the export closure is wider than the bridge ABI" >&2
+            printf '%s\n' "$exported" | grep '^_Z' | head >&2
+            exit 1
+          fi
+          count=$(printf '%s\n' "$exported" | grep -c '^ff_parse_')
+          test "$count" -eq 2 || {
+            echo "expected exactly two exported bridge entry points, found $count" >&2
+            exit 1
+          }
+          echo "exported bridge entry points: $count"
+
+      # A real C consumer of the installed header and artifact. A declaration
+      # whose type is wrong fails to compile; a declaration the artifact does
       # not define fails to link; a rejected parse that still wrote the out
       # parameter fails at run time.
       #
@@ -186,11 +355,6 @@ jobs:
       # 1 + 2^-51 and must land on 1 + 2^-51, the one with the even
       # significand. A parser that rounds halves away from zero passes the
       # first and fails the second.
-      #
-      # `-lc++` is on this link line for the same reason build.zig puts
-      # link_libcpp on the artifact: the archive is compiled from C++ and may
-      # carry C++ runtime references. Linking it the way the build links it is
-      # the point of the gate.
       - name: public C surface compiles, links and runs
         run: |
           set -euo pipefail
@@ -276,15 +440,16 @@ jobs:
               if (d != INFINITY) return 17;
               if (used != len(s)) return 18;
 
-              printf("public C surface compiled, linked and ran\n");
+              printf("public C surface compiled, linked and ran (%s)\n", LINKAGE);
               return 0;
           }
           C
           zig cc -std=c11 \
             -I zig-out/include \
+            -DLINKAGE="\"${{ matrix.linkage }}\"" \
             "$RUNNER_TEMP/c_surface.c" \
-            zig-out/lib/libfast_float.a \
-            -lc++ \
+            "${{ steps.link.outputs.lib }}" \
+            ${{ steps.link.outputs.linkflags }} \
             -o "$RUNNER_TEMP/c_surface"
           "$RUNNER_TEMP/c_surface"
 
@@ -334,7 +499,8 @@ jobs:
           zig c++ -std=c++17 \
             -I zig-out/include \
             "$RUNNER_TEMP/cxx_surface.cpp" \
-            zig-out/lib/libfast_float.a \
+            "${{ steps.link.outputs.lib }}" \
+            ${{ steps.link.outputs.linkflags }} \
             -o "$RUNNER_TEMP/cxx_surface"
           "$RUNNER_TEMP/cxx_surface"
 
@@ -371,6 +537,43 @@ jobs:
       - name: Compile the bridge, the facade, the tests and the example
         run: zig build check -Dtarget=${{ matrix.target }} --summary all
 
+      # The same matrix, delivered as a shared object, one entry per job. This
+      # is where the two export surfaces are actually exercised off the host:
+      # the ELF version script on the three Linux entries, `ld64`'s default
+      # behaviour on the macOS entry, and the generated Windows module
+      # definition on the windows-gnu entry, where a DLL that exports nothing
+      # would fail to link the test binary.
+      #
+      # `wasm32-wasi` is the one entry that cannot take this flag: it has no
+      # dynamic linker, and this build refuses rather than substituting an
+      # archive. Its own step asserts that refusal, naming the target and the
+      # reason, so the cell is a checked outcome rather than a silent skip.
+      - name: Compile the same target as a shared delivery
+        if: matrix.target != 'wasm32-wasi'
+        run: zig build check -Dtarget=${{ matrix.target }} -Dlinkage=dynamic --summary all
+
+      - name: a requested shared delivery is refused for this target
+        if: matrix.target == 'wasm32-wasi'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/dynamic-check.log"
+          if zig build check -Dtarget=wasm32-wasi -Dlinkage=dynamic --summary all > "$log" 2>&1; then
+            echo "expected -Dlinkage=dynamic to be refused for wasm32-wasi" >&2
+            cat "$log" >&2
+            exit 1
+          fi
+          grep -q 'wasm32-wasi' "$log" || {
+            echo "the refusal did not name the target:" >&2
+            cat "$log" >&2
+            exit 1
+          }
+          grep -q 'dynamic linker' "$log" || {
+            echo "the refusal did not say why:" >&2
+            cat "$log" >&2
+            exit 1
+          }
+          echo "the request was refused, with its reason"
+
   consumer:
     name: downstream consumer package
     runs-on: ubuntu-latest
@@ -387,3 +590,11 @@ jobs:
       - name: run
         working-directory: consumer
         run: zig build run --summary all
+
+      # The same consumer against the shared delivery. This is the only place
+      # in this file that proves a *dependent* reaches a working artifact
+      # through the shared link, with no include path and no library of its
+      # own: `consumer/` declares one module import and one option.
+      - name: run (shared delivery)
+        working-directory: consumer
+        run: zig build run -Dlinkage=dynamic --summary all
