@@ -1,14 +1,4 @@
-# devenv input for the fast_float Zig SDK.
-#
-# One input, pinned to the revision this wave uses. There is deliberately no
-# `flake:` key: with `flake: false` this input resolves to the bare channel
-# source, which carries no `lib`, and every devenv subcommand then dies inside
-# its own bootstrap before it reads this repository at all. A flake input gives
-# the same revision plus the `lib` that bootstrap requires.
-#
-# The lock file itself is the driver's to create and to maintain; this file
-# states what the lock must pin. Nothing here names a host account, a node, a
-# store path, a scratch mount or a workspace sibling.
+# Keep nixpkgs as a flake; devenv bootstrap requires `nixpkgs.lib`.
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/c2f38fe7f9e04d9aadd354d380f2bd40531d9737

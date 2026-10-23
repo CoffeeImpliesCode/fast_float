@@ -1,125 +1,70 @@
-//! Consumes the `fast_float` package the way an outside project would.
-//!
-//! Everything here goes through the published surface only: `b.dependency` in
-//! `build.zig`, and `@import("fast_float")` here. No path reaches into the
-//! library's own tree, and nothing is imported from the library's tests or
-//! fixtures, so if this builds and produces the answers below, the module
-//! contract is real.
-//!
-//! The task is a unit-conversion table: a set of physical constants written as
-//! decimals, each of which has to land on an exact IEEE 754 value at both
-//! widths. That is the shape most callers have — a number in a config file, a
-//! sensor reading, a limit — and it is the shape where being one unit off is
-//! invisible in a printed value and obvious in a bit pattern.
-//!
-//! Every expected pattern below was worked out by exact rational rounding, not
-//! read out of this library, and each carries a note saying why it is the
-//! nearest representable value. A mismatch returns an error, so the process
-//! exits non-zero.
-//!
-//! No input is read from anywhere: the table is compiled in, so the program's
-//! output is the same on every run and on every machine, which is what makes it
-//! usable as a check rather than as a demonstration.
-//!
-//! ## Two configurations
-//!
-//! In a linked build the bridge arrives with the module and the program below is
-//! the whole consumer. In a `-Druntime` build nothing is linked, so the provider
-//! is named on the command line (`--provider <path>`) or in
-//! `FASTFLOAT_PROVIDER`, loaded once before anything else, and the same
-//! published answers follow. The difference is one branch and no duplicated
-//! program: nothing is loaded by default and no other file is tried.
+//! Example consumer for the published fast_float package.
 
 const std = @import("std");
 const fast_float = @import("fast_float");
 
-/// A runtime-loading build has no provider until one is named.
+/// Error returned when a runtime provider was not named.
 const ConfigurationError = error{NoProviderConfigured};
 
-/// One decimal constant and the two IEEE 754 patterns it must produce.
+/// Decimal input and its expected binary32 and binary64 patterns.
 const Constant = struct {
     name: []const u8,
-    /// The decimal exactly as it would appear in a config file.
     text: []const u8,
-    /// The nearest binary64 to `text`.
     bits64: u64,
-    /// The nearest binary32 to `text`.
     bits32: u32,
 };
 
-/// The constants, with the reason each pattern is the right one.
+/// Constants and their expected IEEE-754 bit patterns.
 const constants = [_]Constant{
-    // 1/10 has no binary expansion, so both widths round. The nearest double
-    // has significand 0x9999999999999 at exponent 1023 - 4, giving
-    // 0x3FB999999999999A; its exact value is 0.10000000000000000555111512312578.
-    // The nearest float has significand 0xCCCCCD at exponent 127 - 1, giving
-    // 0x3DCCCCCD; its exact value is 0.100000001490116119384765625. Neither is
-    // 0.1 and the two differ, which is the whole point of carrying a width.
+    // 0.1 rounds differently at binary32 and binary64 widths.
     .{
         .name = "one tenth",
         .text = "0.1",
         .bits64 = 0x3FB999999999999A,
         .bits32 = 0x3DCCCCCD,
     },
-    // -2.5 is exactly representable at both widths: 2.5 is 1.25 * 2^1, and a
-    // power of two times 1.25 needs three significand bits. No rounding happens
-    // at all, which makes it the control: a parser that were wrong about
-    // anything structural would still get this one right.
+    // Exact at both widths; a control case.
     .{
         .name = "minus two and a half",
         .text = "-2.5",
         .bits64 = 0xC004000000000000,
         .bits32 = 0xC0200000,
     },
-    // A tenth of a thousandth. The exponent is negative, so this is the case
-    // where a parser has to divide rather than multiply by a power of ten.
+    // Exercises exponent scaling.
     .{
         .name = "one thousandth",
         .text = "1e-3",
         .bits64 = 0x3F50624DD2F1A9FC,
         .bits32 = 0x3A83126F,
     },
-    // One third is not representable at either width, and the two widths do not
-    // agree on it: the double has 53 significand bits and lands on
-    // 0x3FD5555555555555, the float has 24 and lands on 0x3EAAAAAB. Two decimals
-    // a user would consider the same number, two different machine values.
+    // 1/3 rounds to different values at the two widths.
     .{
         .name = "one third",
         .text = "0.3333333333333333",
         .bits64 = 0x3FD5555555555555,
         .bits32 = 0x3EAAAAAB,
     },
-    // 255 is 2^8 - 1, the largest integer a float holds exactly and one below
-    // the point where float integers stop being consecutive.
     .{
         .name = "a byte's worth",
         .text = "255",
         .bits64 = 0x406FE00000000000,
         .bits32 = 0x437F0000,
     },
-    // Standard gravity, as a config file would write it. The decimal has five
-    // significant digits, which both widths can hold, so the two answers are
-    // each within half an ulp of it and both are exact roundings.
+    // Common decimal constant with fixed rounded patterns.
     .{
         .name = "standard gravity",
         .text = "9.80665",
         .bits64 = 0x40239D013A92A305,
         .bits32 = 0x411CE80A,
     },
-    // Avogadro's number: ten significant digits, so the significand has to be
-    // assembled from more digits than either width can keep, and the two
-    // answers are far apart.
+    // Exercises rounding a large decimal at both widths.
     .{
         .name = "Avogadro's number",
         .text = "6.02214076e23",
         .bits64 = 0x44DFE185CA57C517,
         .bits32 = 0x66FF0C2E,
     },
-    // The Planck constant in its 2019 SI formulation. Ten significant digits
-    // again, and a negative exponent, so the digits have to survive a division.
-    // At float width the answer is still a normal number: 6.6e-34 is far above
-    // the smallest normal float, 1.18e-38, so this is rounding and not
-    // underflow.
+    // Exercises a tiny normal value at both widths.
     .{
         .name = "the Planck constant",
         .text = "6.62607015e-34",
@@ -128,17 +73,11 @@ const constants = [_]Constant{
     },
 };
 
-/// A number in a longer line, and where the number stops.
-///
-/// The buffer is what a line-oriented reader would hand over: a value followed
-/// by a unit. `from_chars` reports the prefix, which is what lets the caller
-/// find the unit without scanning again.
+/// Number with a unit suffix, for prefix-parsing checks.
 const measurement = "9.80665 m/s^2";
 
-/// The double nearest to `9.80665`, the same value as in the table above.
 const measurement_bits64: u64 = 0x40239D013A92A305;
 
-/// The unparsed suffix includes the space separating the number from its unit.
 const measurement_suffix = " m/s^2";
 
 pub fn main(init: std.process.Init) !void {
@@ -152,8 +91,7 @@ pub fn main(init: std.process.Init) !void {
     });
 
     for (constants) |constant| {
-        // The exact entry points, because each `text` holds nothing but the
-        // number and there is nothing else for them to accept.
+        // Exact parsing accepts only inputs containing a number.
         const as_double = try fast_float.parse64Exact(constant.text);
         const as_float = try fast_float.parse32Exact(constant.text);
 
@@ -172,8 +110,7 @@ pub fn main(init: std.process.Init) !void {
         );
     }
 
-    // A number followed by a unit. The prefix entry point is the one that can
-    // answer this, and the consumed count is what says where the unit begins.
+    // Prefix parsing must stop before the unit suffix.
     const scanned = try fast_float.parse64(measurement);
     const scanned_bits: u64 = @as(u64, @bitCast(scanned.value));
     if (scanned_bits != measurement_bits64) {
@@ -183,7 +120,6 @@ pub fn main(init: std.process.Init) !void {
         );
         return error.MeasurementBitsMismatch;
     }
-    // `9.80665` is seven bytes; the separating space is not part of the number.
     const unit_start = "9.80665".len;
     if (scanned.consumed != unit_start) {
         std.debug.print(
@@ -202,9 +138,7 @@ pub fn main(init: std.process.Init) !void {
         .{ "with a unit", measurement, scanned_bits, scanned.consumed, suffix },
     );
 
-    // The same line through the exact entry point. Nothing about the parse
-    // changed; what changed is the question, and this buffer does not answer it
-    // because the unit is not part of the number.
+    // Exact parsing must reject the trailing unit.
     const outcome = fast_float.parse64Exact(measurement);
     if (outcome) |value| {
         std.debug.print("the measurement: exact parse accepted it as 0x{X:0>16}\n", .{@as(u64, @bitCast(value))});
@@ -220,8 +154,7 @@ pub fn main(init: std.process.Init) !void {
         },
     }
 
-    // A leading `+` is the difference between this format and `strtod`, and a
-    // config file written by a human is exactly where it turns up.
+    // `from_chars` rejects a leading plus.
     const plus = fast_float.parse64Exact("+9.80665");
     if (plus) |value| {
         std.debug.print("a leading plus was accepted, as 0x{X:0>16}\n", .{@as(u64, @bitCast(value))});
@@ -240,11 +173,7 @@ pub fn main(init: std.process.Init) !void {
     );
 }
 
-/// The provider this run should load, from `--provider <path>` or from
-/// `FASTFLOAT_PROVIDER`.
-///
-/// Both are explicit. Nothing here looks in a default location, and a build that
-/// was not told which file to load says so rather than loading something else.
+/// Reads an explicit provider path from `--provider` or `FASTFLOAT_PROVIDER`.
 fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch
         return noProvider();
@@ -259,8 +188,6 @@ fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
         return noProvider();
 }
 
-/// Say which variable is missing. An error name on its own would send the next
-/// person into the loader instead of to the command line.
 fn noProvider() ConfigurationError {
     std.debug.print(
         "consumer: this is a runtime-loading build. Pass --provider <path>, or " ++

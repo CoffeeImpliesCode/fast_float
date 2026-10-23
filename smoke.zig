@@ -1,51 +1,14 @@
-//! A runnable, deterministic demonstration of the facade. `zig build smoke`
-//! runs this.
-//!
-//! It parses one literal, `"0.1"`, at both widths and prints the IEEE 754 bit
-//! pattern of each result. Every expected pattern below was worked out by exact
-//! rational rounding, not read out of this library, so a change in the output is
-//! a change in fast_float or in the binding rather than a restatement of
-//! either:
-//!
-//! ```text
-//! 1/10 has no binary expansion. At double width the nearest value is
-//! 0x3FB999999999999A, whose exact decimal value is
-//! 0.1000000000000000055511151231257827021181583404541015625. At float width
-//! the nearest value is 0x3DCCCCCD, whose exact value is
-//! 0.100000001490116119384765625.
-//! ```
-//!
-//! Then it shows the three things a caller has to handle and cannot see from a
-//! value alone: that a number can be a prefix of a longer buffer, that a tail
-//! makes the same buffer unacceptable to the exact entry point, and that a
-//! leading `+` is refused where `strtod` would accept it.
-//!
-//! Each expected value is compared with an ordinary comparison and a mismatch
-//! returns an error, so the process exits non-zero. A debug assertion would be
-//! compiled out of a release build, which is not a check.
-//!
-//! ## Two configurations
-//!
-//! In a linked build the bridge is already there and nothing below asks about a
-//! provider. In a `-Druntime` build nothing is linked, so the provider is named
-//! on the command line (`--provider <path>`) or in `FASTFLOAT_PROVIDER` and
-//! loaded once before anything else, and the program says which configuration it
-//! is in the first line. Nothing is loaded by default and no other file is
-//! tried.
+//! Deterministic demonstration of prefix, exact, rejection, and sign-preserving parses.
+//! Runtime-loading builds require `--provider <path>` or `FASTFLOAT_PROVIDER`.
 
 const std = @import("std");
 const fast_float = @import("fast_float");
 
-/// A runtime-loading build has no provider until one is named.
 const ConfigurationError = error{NoProviderConfigured};
 
-/// The one literal every known answer below is about.
 const tenth = "0.1";
 
-/// The nearest double to 1/10, and the nearest float to it.
-///
-/// Written as the bit patterns, not as decimal, because a decimal here would
-/// itself be a value this library produces and could not be checked against.
+/// Expected nearest binary64 and binary32 encodings of 1/10.
 const tenth_bits64: u64 = 0x3FB999999999999A;
 const tenth_bits32: u32 = 0x3DCCCCCD;
 
@@ -63,10 +26,7 @@ pub fn main(init: std.process.Init) !void {
         if (fast_float.runtime_loaded) "runtime-loaded" else "linked",
     });
 
-    // Which file the table was actually filled from. It is whatever this
-    // invocation named, so it is still a deterministic line of output, and it
-    // is the only place this program can show that the load really happened
-    // rather than that a linked copy answered.
+    // Report the provider used by a runtime-loading build.
     if (fast_float.runtime_loaded) {
         if (fast_float.loadedSource()) |source| switch (source) {
             .path => |p| try w.print("provider: {s}\n", .{p}),
@@ -75,8 +35,6 @@ pub fn main(init: std.process.Init) !void {
     }
     try w.print("parsing the literal {s} at both widths\n", .{tenth});
 
-    // The exact entry points, because the buffer holds nothing but the number
-    // and there is nothing else for them to accept.
     const as_double = try fast_float.parse64Exact(tenth);
     if (@as(u64, @bitCast(as_double)) != tenth_bits64) {
         try w.print("  double: expected 0x{X:0>16}, parsed 0x{X:0>16}\n", .{
@@ -99,9 +57,7 @@ pub fn main(init: std.process.Init) !void {
     }
     try w.print("  float:  0.1 -> 0x{X:0>8}\n", .{tenth_bits32});
 
-    // The prefix contract. `from_chars` consumes the number and stops at the
-    // first byte that cannot continue it, and reports where it stopped, so the
-    // caller decides what a number followed by something else means.
+    // Prefix parsing reports where the numeric portion ends.
     const buffered = "0.1 seconds";
     const prefix = try fast_float.parse64(buffered);
     if (@as(u64, @bitCast(prefix.value)) != tenth_bits64 or prefix.consumed != 3) {
@@ -120,9 +76,6 @@ pub fn main(init: std.process.Init) !void {
         prefix.consumed,
     });
 
-    // The same prefix contract at float width, which is the other half of the
-    // typed surface and lands on a different value: 0.1 is not representable at
-    // either width and the two roundings differ.
     const buffered32 = "0.1 seconds";
     const prefix32 = try fast_float.parse32(buffered32);
     const prefix32_bits: u32 = @as(u32, @bitCast(prefix32.value));
@@ -142,10 +95,7 @@ pub fn main(init: std.process.Init) !void {
         prefix32.consumed,
     });
 
-    // The same buffer through the exact entry point. This is the one difference
-    // between the two pairs of functions, and it is a difference in what the
-    // caller asked for, not in what was parsed: the number is still 0.1, and the
-    // buffer is simply not entirely a number.
+    // Exact parsing rejects the same buffer's trailing text.
     const refusal = fast_float.parse64Exact(buffered);
     if (refusal) |value| {
         try w.print("  exact {s}: unexpectedly accepted, as 0x{X:0>16}\n", .{ buffered, @as(u64, @bitCast(value)) });
@@ -160,9 +110,7 @@ pub fn main(init: std.process.Init) !void {
         },
     }
 
-    // The format is the one C++17 gives `from_chars` and not the one `strtod`
-    // gives: no leading `+`, and no skipping of leading whitespace. Both of
-    // these are the same number to `strtod`, and both are refused here.
+    // General format rejects leading whitespace and a leading plus sign.
     for ([_][]const u8{ "+0.1", " 0.1", "\t0.1" }) |refused| {
         const outcome = fast_float.parse64Exact(refused);
         if (outcome) |value| {
@@ -179,8 +127,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // A negative zero keeps its sign, which is a property of the value that a
-    // decimal print would hide.
+    // Inspect bits because decimal formatting hides negative zero.
     const negative_zero = try fast_float.parse64Exact("-0.0");
     const zero_bits: u64 = @as(u64, @bitCast(negative_zero));
     if (zero_bits != 0x8000000000000000) {
@@ -194,12 +141,7 @@ pub fn main(init: std.process.Init) !void {
     try w.flush();
 }
 
-/// The provider this run should load, from `--provider <path>` or from
-/// `FASTFLOAT_PROVIDER`.
-///
-/// Both are explicit. Nothing here looks in a default location or falls back to
-/// a linked copy: a runtime-loading build that was not told which file to load
-/// reports that it was not told, rather than loading something else.
+/// Reads an explicit provider path from `--provider` or `FASTFLOAT_PROVIDER`.
 fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch
         return noProvider();
@@ -214,8 +156,7 @@ fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
         return noProvider();
 }
 
-/// Say which variable is missing. An error name on its own would send the next
-/// person into the loader instead of to the command line.
+/// Prints the missing-provider diagnostic and returns the configuration error.
 fn noProvider() ConfigurationError {
     std.debug.print(
         "smoke: this is a runtime-loading build. Pass --provider <path>, or " ++

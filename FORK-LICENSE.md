@@ -1,9 +1,6 @@
-# FORK-LICENSE.md — the licence of the files this fork authored
+# FORK-LICENSE.md — fork-authored files
 
-This file records the grant covering the files **this fork wrote**, as distinct
-from the files it carried. It does not restate or replace any licence text.
-
-## The grant
+## Grant
 
 ```
 SPDX-License-Identifier: Apache-2.0 OR MIT OR BSL-1.0
@@ -17,109 +14,51 @@ alternative this repository administers against** — the one whose §4 duties
 `NOTICE.md` and `CHANGELOG.md` are written to discharge — but no downstream is
 required to take it, and nothing here narrows the other two.
 
-**Authorization.** The owner of this workspace authorized per-project licensing
-for fork-authored additions in this wave and required that the authorization and
-the resulting grant both be recorded here and in `NOTICE.md`. This is that
-record. It covers fork-authored files only; every carried file keeps its own
-terms, below.
+This grant covers fork-authored files only; carried files retain their own terms.
 
 **Copyright.** Held by the private downstream that owns this repository. No
 individual is named in this record and none is asserted. Upstream authors are not
 credited with anything in the fork-authored set; their authorship of the carried
 work is recorded in `NOTICE.md` and in `AUTHORS`/`CONTRIBUTORS`.
 
-## What the grant covers
+## Paths covered by this grant
 
-| Path | What it is |
+| Path |
+|---|
+| `build.zig`, `build.zig.zon`, `build_support/graph.zig` |
+| `zig/bridge.h`, `zig/bridge.cpp`, `zig/root.zig` |
+| `runtime/graph.zig`, `runtime/library.zig`, `runtime/loader.zig`, `runtime/generate.zig`, `runtime/sync.c`, `runtime/sync.h` |
+| `tests.zig`, `smoke.zig` |
+| `consumer/` |
+| `cross-test.profile.sh` |
+| `.github/workflows/verify.yml` |
+| `README.md` (fork README; upstream's README is `README.upstream.md`) |
+| `README.zig.md` |
+| `CHANGELOG.md`, `FORK-NOTES.md`, `NOTICE.md`, `UPSTREAM.md`, `FORK-LICENSE.md`, `UPSTREAM.sha256`, `testdata/README.md` |
+| `package.nix`, `flake.nix`, `devenv.nix`, `devenv.yaml`, `.envrc` |
+| The appended block of `.gitignore`; upstream's list is retained verbatim |
+
+## Carried files and their terms
+
+| Path | Licence and origin |
 |---|---|
-| `build.zig`, `build.zig.zon`, `build_support/graph.zig` | build graph entry point, manifest, per-target assembly |
-| `zig/bridge.h`, `zig/bridge.cpp`, `zig/root.zig` | the plain-C ABI header, the only C++ translation unit, the Zig facade |
-| `runtime/graph.zig`, `runtime/library.zig`, `runtime/loader.zig`, `runtime/generate.zig`, `runtime/sync.c`, `runtime/sync.h` | the whole runtime-loading route `-Druntime` builds: the build wiring, this SDK's descriptor, the reusable loader core, the build-time dispatch generator, and the namespaced synchronization binding |
-| `tests.zig`, `smoke.zig` | behavioural test root, smoke example |
-| `consumer/` | the separate package that consumes this one by relative path |
-| `cross-test.profile.sh` | settings for the `cross-test` matrix driver |
-| `.github/workflows/verify.yml` | this fork's verification workflow |
-| `README.md` | this fork's README (upstream's bytes are `README.upstream.md`) |
-| `README.zig.md` | Zig interface documentation |
-| `CHANGELOG.md`, `FORK-NOTES.md`, `NOTICE.md`, `UPSTREAM.md`, `FORK-LICENSE.md`, `UPSTREAM.sha256`, `testdata/README.md` | provenance, integrity, licence and documentation records |
-| `package.nix`, `flake.nix`, `devenv.nix`, `devenv.yaml`, `.envrc` | standalone Nix packaging and development environment |
-| the appended block of `.gitignore` | the fork's Zig ignore entries, below upstream's own list, which is kept verbatim |
+| `include/fast_float/**` (9 headers), `tests/**` (48 files), `benchmarks/`, `cmake/`, `ci/`, `docs/`, `script/`, `fuzz/`, `CMakeLists.txt`, `BUILD.bazel`, `MODULE.bazel`, `.bazelrc`, `.clang-format`, `clang-format-ignore.txt`, `AUTHORS`, `CONTRIBUTORS`, `SECURITY.md`, `.travis.yml`, `.cirrus.yml` | `Apache-2.0 OR MIT OR BSL-1.0`; upstream `v8.3.0` |
+| `README.upstream.md` | Same terms; byte-preserved copy of upstream `README.md` from `v8.3.0` |
+| `LICENSE-APACHE`, `LICENSE-MIT`, `LICENSE-BOOST` | Upstream Apache-2.0, MIT and BSL-1.0 texts, respectively; verbatim |
+| `.github/workflows/*` other than `verify.yml` (21 files), `.github/dependabot.yml`, `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md` | `Apache-2.0 OR MIT OR BSL-1.0`; upstream files carried for provenance |
+| `testdata/supplemental/**` (16 files) | Apache-2.0 only, no alternatives; `fastfloat/supplemental_test_files` at `088643e8d5010bd3d1540fe48685601b43b9a3e5`. Its grant and Nigel Tao data credit are in `testdata/supplemental/README.md`. |
+| The upstream portion of `.gitignore` | `Apache-2.0 OR MIT OR BSL-1.0`; upstream, verbatim and unedited |
 
-## What the grant does not cover
+The supplemental corpus keeps its own Apache-2.0 grant. It is not re-granted
+here; every delivery installs its licence separately from this repository's
+`LICENSE-APACHE`.
 
-Material carried, not authored, keeps its own terms. A file's licence is the
-licence of the file.
+## Apache-2.0 obligations
 
-| Path | Actual term |
-|---|---|
-| `include/fast_float/**` (9 headers) | `Apache-2.0 OR MIT OR BSL-1.0` — upstream `v8.3.0` |
-| `tests/**` (48 files) | `Apache-2.0 OR MIT OR BSL-1.0` — upstream `v8.3.0` |
-| `benchmarks/`, `cmake/`, `ci/`, `docs/`, `script/`, `fuzz/` | `Apache-2.0 OR MIT OR BSL-1.0` — upstream `v8.3.0` |
-| `CMakeLists.txt`, `BUILD.bazel`, `MODULE.bazel`, `.bazelrc`, `.clang-format`, `clang-format-ignore.txt`, `AUTHORS`, `CONTRIBUTORS`, `SECURITY.md`, `.travis.yml`, `.cirrus.yml` | `Apache-2.0 OR MIT OR BSL-1.0` — upstream `v8.3.0` |
-| `README.upstream.md` | `Apache-2.0 OR MIT OR BSL-1.0` — upstream `v8.3.0`, byte-preserved copy of upstream's `README.md` |
-| `LICENSE-APACHE`, `LICENSE-MIT`, `LICENSE-BOOST` | Apache-2.0 / MIT / BSL-1.0 respectively — upstream, verbatim |
-| `.github/workflows/*` other than `verify.yml` (21 files), `.github/dependabot.yml`, `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md` | `Apache-2.0 OR MIT OR BSL-1.0` — upstream; carried for provenance, not retargeted, not built |
-| `testdata/supplemental/**` (16 files) | **Apache-2.0 only, no alternatives** — `fastfloat/supplemental_test_files` at `088643e8d5010bd3d1540fe48685601b43b9a3e5`; the grant and the Nigel Tao data credit are the corpus's own words in `testdata/supplemental/README.md` |
-| the upstream portion of `.gitignore` | `Apache-2.0 OR MIT OR BSL-1.0` — upstream, verbatim and unedited |
-
-The corpus is inventoried file by file in `NOTICE.md`, including the four
-`remyoudompheng-fptest-*.txt` files that are carried, hashed and deliberately not
-read. Reading fewer of them does not narrow their grant: the corpus's own README
-credits "the data" without naming a subset.
-
-## Obligations that survive the election
-
-The `OR` is a choice for whoever takes this material. It does not release what is
-already owed to the works being redistributed:
-
-* All three upstream texts ship whole and unedited, and are named in `NOTICE.md`
-  and `UPSTREAM.md` so the shipped alternatives cannot quietly reduce to one.
-* **Apache-2.0 §4(b), a statement of changes**, is `NOTICE.md`'s "What this fork
-  changed" with `CHANGELOG.md`. No upstream source, header, test, licence text or
-  donor byte is modified, so the change statement for the carried works is the
-  appended `.gitignore` block and nothing else.
-* **§4(c), retention of notices**, holds because no carried file is edited.
-* **§4(d), attribution**, is `NOTICE.md`.
-* **The patent grant in `LICENSE-APACHE` §3 terminates on patent litigation
-  against the work.** This fork adds no parsing, rounding, big-integer or
-  digit-comparison code — `zig/bridge.cpp` calls `fast_float::from_chars` once
-  per width and reports the result.
-* **The corpus's single Apache-2.0 grant has no alternative and is not
-  re-granted here.** Its text ships at `testdata/supplemental/LICENSE`,
-  byte-distinct from this repository's `LICENSE-APACHE`, and every delivery
-  installs both under distinct names.
-
-## Where these terms appear in an installed output
-
-`zig build install` writes every path below, so the Zig install and both Nix
-packages carry the same set from one writer. `$out` stands for whichever install
-prefix is in use.
-
-| Path under the install prefix | Content |
-|---|---|
-| `$out/share/licenses/fast_float/LICENSE-APACHE` | upstream's Apache-2.0 text, verbatim |
-| `$out/share/licenses/fast_float/LICENSE-MIT` | upstream's MIT text, verbatim |
-| `$out/share/licenses/fast_float/LICENSE-BOOST` | upstream's BSL-1.0 text, verbatim |
-| `$out/share/licenses/fast_float/NOTICE.md` | attribution, the grants and which applies where, the corpus inventory, the Apache-2.0 obligations |
-| `$out/share/licenses/fast_float/FORK-LICENSE.md` | this file |
-| `$out/share/licenses/fast_float/UPSTREAM.md` | provenance and the integrity record's scope |
-| `$out/share/licenses/fast_float/README.upstream.md` | upstream's README, byte for byte |
-| `$out/share/licenses/fast_float/testdata-supplemental-LICENSE` | the corpus's own Apache-2.0 text, under a distinct name because it is a distinct copy |
-
-## Where these terms appear in source
-
-Every fork-authored source and build file added by this wave carries the SPDX
-identifier `Apache-2.0 OR MIT OR BSL-1.0` on its first line, which includes all
-six runtime-route files: `runtime/graph.zig:1`, `runtime/library.zig:1`,
-`runtime/loader.zig:1` and `runtime/generate.zig:1` as a Zig comment, and
-`runtime/sync.c:1` and `runtime/sync.h:1` as the same identifier in a C comment.
-Files that existed before this wave keep whatever header form they already had;
-the grant is recorded per file group above.
-
-## Related records
-
-* `NOTICE.md` — upstream attribution, all three grants, the corpus inventory,
-  every file this fork adds or edits, and the Apache-2.0 obligations.
-* `UPSTREAM.md` — the pinned ref and the integrity record's scope.
-* `UPSTREAM.sha256` — 73 digests over every immutable upstream and donor byte.
-* `README.md` — the fork's README. `README.upstream.md` — upstream's, byte for byte.
+* §4(b): `NOTICE.md` and `CHANGELOG.md` state the fork's changes. Changes to
+  carried work are limited to the appended `.gitignore` block.
+* §4(c): notices remain because no carried file is edited. §4(d) attribution is
+  in `NOTICE.md`.
+* §3 terminates the patent grant on patent litigation against the work. The fork
+  adds no parsing, rounding, big-integer or digit-comparison code; `zig/bridge.cpp`
+  calls `fast_float::from_chars` once per width and reports its result.
