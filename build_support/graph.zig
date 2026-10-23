@@ -697,7 +697,6 @@ pub fn addTests(
 
 /// Provides the corpus directory to behavioural tests as a build option.
 /// The Options step tracks its contents; tests resolve the relative path from the inherited working directory.
-
 pub fn addFixturePaths(b: *std.Build) *std.Build.Module {
     const options = b.addOptions();
     options.addOptionPathDirectory("data_dir", b.path(fixture_data_dir));
