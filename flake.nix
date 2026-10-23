@@ -3,7 +3,7 @@
 
   # flake.lock pins the nixpkgs revision named above.
   inputs.nixpkgs.url =
-    "github:NixOS/nixpkgs/c7def046b9a883d46974757852106483d741586f";
+    "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe";
 
   outputs = { self, nixpkgs }:
     let
@@ -19,7 +19,7 @@
 
       # Use the Zig release required by build.zig.zon.
       fastFloat = pkgs: linkage:
-        pkgs.callPackage ./package.nix { zig = pkgs.zig_0_16; inherit linkage; };
+        pkgs.callPackage ./package.nix { zig = pkgs.zig_0_17; inherit linkage; };
     in
     {
       packages = forAllSystems (pkgs: rec {
@@ -32,7 +32,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.zig_0_16
+            pkgs.zig_0_17
             pkgs.pkg-config
           ];
 

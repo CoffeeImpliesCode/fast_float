@@ -32,6 +32,7 @@ Upstream's CMake target is `INTERFACE` and compiles no library. The Zig graph co
 - `-Druntime=true` selects generated dispatch through an explicitly named provider. It is independent of `-Dlinkage`; the selected artifact is still built, but the module does not link it.
 - There is no system-library build option: upstream installs headers, not a binary ABI. Runtime `.system` names a provider for the platform loader; it is not a build-time system-library mode.
 - The runtime graph reuses one loader-core module in linked and loaded configurations, so public loader types retain one Zig type identity.
+- The Zig 0.17 runtime graph passes the translation step to dispatch generation and tracks its generated input with `addFileArg2`.
 - `zig build check` compiles the tests and example for the six-target matrix, or only `-Dtarget=<triple>` when supplied; it does not run them. `zig build test` schedules execution for the selected target, which needs an external executor when it is not runnable on the host.
 - The test graph passes a fixture-directory module and reads corpus files from disk. It reads nine of thirteen data files; the four retained `remyoudompheng-fptest-*.txt` files are not read because other producers cover their patterns.
 - The install graph owns the artifact, headers, relocatable `fast_float.pc`, and licence records; the Nix derivation does not regenerate those files.

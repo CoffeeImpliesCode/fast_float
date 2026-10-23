@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const linkage = b.option(
-        std.builtin.LinkMode,
+        std.lang.LinkMode,
         "linkage",
         "Deliver the C ABI bridge as a static archive (the default, and what " ++
             "this package has always produced) or as a real shared object with " ++
@@ -125,5 +125,5 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    if (b.args) |args| run_smoke.addArgs(args);
+    run_smoke.addPassthruArgs();
 }

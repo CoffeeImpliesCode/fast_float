@@ -93,19 +93,19 @@ fn validateSource(source: LoadSource) LoadError!void {
     if (std.mem.indexOfScalar(u8, text, 0) != null) return error.InvalidSource;
     switch (source) {
         .path => {
-            const absolute = if (builtin.os.tag == .windows)
-                switch (std.fs.path.getWin32PathType(u8, text)) {
+            const absolute = if (builtin.target.os.tag == .windows)
+                switch (std.Io.Dir.path.getWin32PathType(u8, text)) {
                     .drive_absolute, .unc_absolute, .local_device, .root_local_device => true,
                     .relative, .rooted, .drive_relative => false,
                 }
             else
-                std.fs.path.isAbsolutePosix(text);
+                std.Io.Dir.path.isAbsolutePosix(text);
             if (!absolute) return error.InvalidSource;
         },
         .system => {
             for (text) |byte| {
-                if (std.fs.path.isSep(byte)) return error.InvalidSource;
-                if (builtin.os.tag == .windows and byte == ':') return error.InvalidSource;
+                if (std.Io.Dir.path.isSep(byte)) return error.InvalidSource;
+                if (builtin.target.os.tag == .windows and byte == ':') return error.InvalidSource;
             }
         },
     }
@@ -123,21 +123,21 @@ pub const Phase = enum(u8) {
 
 /// Publishes readiness with release ordering; routed calls read it with acquire ordering.
 pub const Ready = struct {
-    phase: std.atomic.Value(u8) = .init(@intFromEnum(Phase.not_loaded)),
+    phase: std.atomic.Value(u8) = .init(@backingInt(Phase.not_loaded)),
 
     /// Whether the table has been published.
     pub fn isReady(self: *const Ready) bool {
-        return self.phase.load(.acquire) == @intFromEnum(Phase.ready);
+        return self.phase.load(.acquire) == @backingInt(Phase.ready);
     }
 
     /// Returns the state used by loader decisions under the lock.
     pub fn state(self: *const Ready) Phase {
-        return @enumFromInt(self.phase.load(.acquire));
+        return @fromBackingInt(@intCast(self.phase.load(.acquire)));
     }
 
     /// Publishes a state change with release ordering.
     pub fn set(self: *Ready, value: Phase) void {
-        self.phase.store(@intFromEnum(value), .release);
+        self.phase.store(@backingInt(value), .release);
     }
 };
 
@@ -167,7 +167,7 @@ pub fn panicNotReady(library: []const u8, comptime symbol: []const u8) noreturn 
 }
 
 /// Whether this target supports a dynamic library loader.
-pub const supported_target: bool = switch (builtin.os.tag) {
+pub const supported_target: bool = switch (builtin.target.os.tag) {
     .wasi, .emscripten, .freestanding => false,
     else => true,
 };
@@ -327,7 +327,7 @@ const Attempt = struct {
 /// Buffer size for Windows paths, in UTF-16 code units.
 const windows_path_units = 32768;
 
-const platform = if (builtin.os.tag == .windows)
+const platform = if (builtin.target.os.tag == .windows)
     Windows
 else if (supported_target)
     Unix

@@ -3,7 +3,7 @@
 
 let
   # Use the Zig release required by build.zig.zon.
-  zig = pkgs.zig_0_16;
+  zig = pkgs.zig_0_17;
 
   mk = linkage: pkgs.callPackage ./package.nix { inherit zig linkage; };
 

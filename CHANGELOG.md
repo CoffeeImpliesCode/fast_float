@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- Port to Zig 0.17.0.
 - Clarified the Zig API contract for facade errors, bridge statuses, prefix and exact parsing, buffer lifetimes, and runtime loading.
 - Shipped `flake.lock` with the package to pin the flake's nixpkgs input.
 - Added opt-in runtime-loaded dispatch with `-Druntime`; callers select a provider with `--provider` or `FASTFLOAT_PROVIDER`.

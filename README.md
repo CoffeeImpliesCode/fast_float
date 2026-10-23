@@ -2,7 +2,7 @@
 
 fast_float is a Zig package for upstream fast_float 8.3.0, a header-only C++ decimal-to-binary parser.
 It builds the upstream parser into a C ABI library and provides a Zig facade.
-The package requires Zig 0.16.0 and has no build-time dependencies.
+The package requires Zig 0.17.0 and has no build-time dependencies.
 
 ## Source deviations from upstream
 
