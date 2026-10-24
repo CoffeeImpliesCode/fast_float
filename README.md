@@ -49,10 +49,8 @@ On ELF and Windows, shared libraries export the two C ABI functions. Darwin shar
 
 Add the package to `build.zig.zon`:
 
-```zig
-.dependencies = .{
-    .fast_float = .{ .path = "../fast_float" },
-},
+```sh
+zig fetch --save git+https://github.com/CoffeeImpliesCode/fast_float#v8.3.0
 ```
 
 Import the module in `build.zig`:
